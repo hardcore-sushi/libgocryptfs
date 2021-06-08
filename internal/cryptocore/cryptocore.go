@@ -12,9 +12,8 @@ import (
 
 	"github.com/rfjakob/eme"
 
-	"github.com/rfjakob/gocryptfs/internal/siv_aead"
-	"github.com/rfjakob/gocryptfs/internal/stupidgcm"
-	"github.com/rfjakob/gocryptfs/internal/tlog"
+	"../siv_aead"
+	"../stupidgcm"
 )
 
 const (
@@ -157,13 +156,10 @@ type wiper interface {
 func (c *CryptoCore) Wipe() {
 	be := c.AEADBackend
 	if be == BackendOpenSSL || be == BackendAESSIV {
-		tlog.Debug.Printf("CryptoCore.Wipe: Wiping AEADBackend %d key", be)
 		// We don't use "x, ok :=" because we *want* to crash loudly if the
 		// type assertion fails.
 		w := c.AEADCipher.(wiper)
 		w.Wipe()
-	} else {
-		tlog.Debug.Printf("CryptoCore.Wipe: Only nil'ing stdlib refs")
 	}
 	// We have no access to the keys (or key-equivalents) stored inside the
 	// Go stdlib. Best we can is to nil the references and force a GC.

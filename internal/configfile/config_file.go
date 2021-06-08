@@ -12,10 +12,9 @@ import (
 
 	"os"
 
-	"github.com/rfjakob/gocryptfs/internal/contentenc"
-	"github.com/rfjakob/gocryptfs/internal/cryptocore"
-	"github.com/rfjakob/gocryptfs/internal/exitcodes"
-	"github.com/rfjakob/gocryptfs/internal/tlog"
+	"../contentenc"
+	"../cryptocore"
+	"../exitcodes"
 )
 
 const (
@@ -113,11 +112,10 @@ func Create(filename string, password []byte, plaintextNames bool,
 		} else {
 			key = cryptocore.RandBytes(cryptocore.KeyLen)
 		}
-		tlog.PrintMasterkeyReminder(key)
 		// Encrypt it using the password
 		// This sets ScryptObject and EncryptedKey
 		// Note: this looks at the FeatureFlags, so call it AFTER setting them.
-		cf.EncryptKey(key, password, logN)
+		cf.EncryptKey(key, password, logN, false)
 		for i := range key {
 			key[i] = 0
 		}
@@ -147,7 +145,7 @@ func LoadAndDecrypt(filename string, password []byte) ([]byte, *ConfFile, error)
 	}
 
 	// Decrypt the masterkey using the password
-	key, err := cf.DecryptMasterKey(password)
+	key, _, err := cf.DecryptMasterKey(password, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -172,7 +170,6 @@ func Load(filename string) (*ConfFile, error) {
 	// Unmarshal
 	err = json.Unmarshal(js, &cf)
 	if err != nil {
-		tlog.Warn.Printf("Failed to unmarshal config file")
 		return nil, err
 	}
 
@@ -202,17 +199,6 @@ func Load(filename string) (*ConfFile, error) {
 		}
 	}
 	if deprecatedFs {
-		fmt.Fprintf(os.Stderr, tlog.ColorYellow+`
-    The filesystem was created by gocryptfs v0.6 or earlier. This version of
-    gocryptfs can no longer mount the filesystem.
-    Please download gocryptfs v0.11 and upgrade your filesystem,
-    see https://github.com/rfjakob/gocryptfs/wiki/Upgrading for instructions.
-
-    If you have trouble upgrading, join the discussion at
-    https://github.com/rfjakob/gocryptfs/issues/29 .
-
-`+tlog.ColorReset)
-
 		return nil, exitcodes.NewErr("Deprecated filesystem", exitcodes.DeprecatedFS)
 	}
 
@@ -222,38 +208,38 @@ func Load(filename string) (*ConfFile, error) {
 
 // DecryptMasterKey decrypts the masterkey stored in cf.EncryptedKey using
 // password.
-func (cf *ConfFile) DecryptMasterKey(password []byte) (masterkey []byte, err error) {
+func (cf *ConfFile) DecryptMasterKey(password []byte, giveHash bool) (masterkey, scryptHash []byte, err error) {
 	// Generate derived key from password
-	scryptHash := cf.ScryptObject.DeriveKey(password)
+	scryptHash = cf.ScryptObject.DeriveKey(password)
 
 	// Unlock master key using password-based key
 	useHKDF := cf.IsFeatureFlagSet(FlagHKDF)
 	ce := getKeyEncrypter(scryptHash, useHKDF)
 
-	tlog.Warn.Enabled = false // Silence DecryptBlock() error messages on incorrect password
 	masterkey, err = ce.DecryptBlock(cf.EncryptedKey, 0, nil)
-	tlog.Warn.Enabled = true
 
-	// Purge scrypt-derived key
-	for i := range scryptHash {
-		scryptHash[i] = 0
+	if !giveHash {
+		// Purge scrypt-derived key
+		for i := range scryptHash {
+			scryptHash[i] = 0
+		}
+		scryptHash = nil
 	}
-	scryptHash = nil
 	ce.Wipe()
 	ce = nil
 
 	if err != nil {
-		tlog.Warn.Printf("failed to unlock master key: %s", err.Error())
-		return nil, exitcodes.NewErr("Password incorrect.", exitcodes.PasswordIncorrect)
+		return nil, nil, exitcodes.NewErr("Password incorrect.", exitcodes.PasswordIncorrect)
 	}
-	return masterkey, nil
+
+	return masterkey, scryptHash, nil
 }
 
 // EncryptKey - encrypt "key" using an scrypt hash generated from "password"
 // and store it in cf.EncryptedKey.
 // Uses scrypt with cost parameter logN and stores the scrypt parameters in
 // cf.ScryptObject.
-func (cf *ConfFile) EncryptKey(key []byte, password []byte, logN int) {
+func (cf *ConfFile) EncryptKey(key []byte, password []byte, logN int, giveHash bool) []byte {
 	// Generate scrypt-derived key from password
 	cf.ScryptObject = NewScryptKDF(logN)
 	scryptHash := cf.ScryptObject.DeriveKey(password)
@@ -263,13 +249,45 @@ func (cf *ConfFile) EncryptKey(key []byte, password []byte, logN int) {
 	ce := getKeyEncrypter(scryptHash, useHKDF)
 	cf.EncryptedKey = ce.EncryptBlock(key, 0, nil)
 
-	// Purge scrypt-derived key
-	for i := range scryptHash {
-		scryptHash[i] = 0
+	if !giveHash {
+		// Purge scrypt-derived key
+		for i := range scryptHash {
+			scryptHash[i] = 0
+		}
+		scryptHash = nil
 	}
-	scryptHash = nil
 	ce.Wipe()
 	ce = nil
+
+	return scryptHash
+}
+
+// DroidFS function to allow masterkey to be decrypted directely using the scrypt hash and return it if requested
+func (cf *ConfFile) GetMasterkey(password, givenScryptHash, returnedScryptHashBuff []byte) []byte {
+	var masterkey []byte
+	var err error
+	var scryptHash []byte
+	if len(givenScryptHash) > 0 { //decrypt with hash
+		useHKDF := cf.IsFeatureFlagSet(FlagHKDF)
+		ce := getKeyEncrypter(givenScryptHash, useHKDF)
+		masterkey, err = ce.DecryptBlock(cf.EncryptedKey, 0, nil)
+		ce.Wipe()
+		ce = nil
+		if err == nil {
+			return masterkey
+		}
+	} else { //decrypt with password
+		masterkey, scryptHash, err = cf.DecryptMasterKey(password, len(returnedScryptHashBuff) > 0)
+		//copy and wipe scryptHash
+		for i := range scryptHash {
+			returnedScryptHashBuff[i] = scryptHash[i]
+			scryptHash[i] = 0
+		}
+		if err == nil {
+			return masterkey
+		}
+	}
+	return nil
 }
 
 // WriteFile - write out config in JSON format to file "filename.tmp"
@@ -296,7 +314,6 @@ func (cf *ConfFile) WriteFile() error {
 	if err != nil {
 		// This can happen on network drives: FRITZ.NAS mounted on MacOS returns
 		// "operation not supported": https://github.com/rfjakob/gocryptfs/issues/390
-		tlog.Warn.Printf("Warning: fsync failed: %v", err)
 		// Try sync instead
 		syscall.Sync()
 	}

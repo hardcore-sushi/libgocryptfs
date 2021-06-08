@@ -9,8 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/rfjakob/gocryptfs/internal/syscallcompat"
-	"github.com/rfjakob/gocryptfs/internal/tlog"
+	"../syscallcompat"
 )
 
 const (
@@ -113,9 +112,6 @@ func ReadLongNameAt(dirfd int, cName string) (string, error) {
 // This function is symlink-safe through the use of Unlinkat().
 func DeleteLongNameAt(dirfd int, hashName string) error {
 	err := syscallcompat.Unlinkat(dirfd, hashName+LongNameSuffix, 0)
-	if err != nil {
-		tlog.Warn.Printf("DeleteLongName: %v", err)
-	}
 	return err
 }
 
@@ -141,25 +137,18 @@ func (n *NameTransform) WriteLongNameAt(dirfd int, hashName string, plainName st
 	fdRaw, err := syscallcompat.Openat(dirfd, hashName+LongNameSuffix,
 		syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL, namePerms)
 	if err != nil {
-		// Don't warn if the file already exists - this is allowed for renames
-		// and should be handled by the caller.
-		if err != syscall.EEXIST {
-			tlog.Warn.Printf("WriteLongName: Openat: %v", err)
-		}
 		return err
 	}
 	fd := os.NewFile(uintptr(fdRaw), hashName+LongNameSuffix)
 	_, err = fd.Write([]byte(cName))
 	if err != nil {
 		fd.Close()
-		tlog.Warn.Printf("WriteLongName: Write: %v", err)
 		// Delete incomplete longname file
 		syscallcompat.Unlinkat(dirfd, hashName+LongNameSuffix, 0)
 		return err
 	}
 	err = fd.Close()
 	if err != nil {
-		tlog.Warn.Printf("WriteLongName: Close: %v", err)
 		// Delete incomplete longname file
 		syscallcompat.Unlinkat(dirfd, hashName+LongNameSuffix, 0)
 		return err

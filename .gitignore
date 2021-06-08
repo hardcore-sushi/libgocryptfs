@@ -1,22 +1,10 @@
-# the gocryptfs executable
-/gocryptfs
+/build
+/include
+/lib
+/openssl*
 
 # temporary files created by the tests
 /tmp
 
-# binary releases and signatiures
-/*.tar.gz
-/*.asc
-
 # Binaries created for cpu profiling
 *.test
-
-# Rendered manpage
-gocryptfs.1
-
-# Dependencies copied by "dep"
-/vendor
-/_vendor-*
-
-# Source tarball version. Should never be committed to git.
-/VERSION

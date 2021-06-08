@@ -8,8 +8,6 @@ import (
 	"syscall"
 
 	"github.com/rfjakob/eme"
-
-	"github.com/rfjakob/gocryptfs/internal/tlog"
 )
 
 const (
@@ -88,22 +86,18 @@ func (n *NameTransform) decryptName(cipherName string, iv []byte) (string, error
 		return "", err
 	}
 	if len(bin) == 0 {
-		tlog.Warn.Printf("DecryptName: empty input")
 		return "", syscall.EBADMSG
 	}
 	if len(bin)%aes.BlockSize != 0 {
-		tlog.Debug.Printf("DecryptName %q: decoded length %d is not a multiple of 16", cipherName, len(bin))
 		return "", syscall.EBADMSG
 	}
 	bin = n.emeCipher.Decrypt(iv, bin)
 	bin, err = unPad16(bin)
 	if err != nil {
-		tlog.Warn.Printf("DecryptName %q: unPad16 error: %v", cipherName, err)
 		return "", syscall.EBADMSG
 	}
 	plain := string(bin)
 	if err := IsValidName(plain); err != nil {
-		tlog.Warn.Printf("DecryptName %q: invalid name after decryption: %v", cipherName, err)
 		return "", syscall.EBADMSG
 	}
 	return plain, err
@@ -116,7 +110,6 @@ func (n *NameTransform) decryptName(cipherName string, iv []byte) (string, error
 // to the full (not hashed) name if longname is used.
 func (n *NameTransform) EncryptName(plainName string, iv []byte) (cipherName64 string, err error) {
 	if err := IsValidName(plainName); err != nil {
-		tlog.Warn.Printf("EncryptName %q: invalid plainName: %v", plainName, err)
 		return "", syscall.EBADMSG
 	}
 	bin := []byte(plainName)

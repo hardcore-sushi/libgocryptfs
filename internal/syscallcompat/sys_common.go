@@ -5,8 +5,6 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/rfjakob/gocryptfs/internal/tlog"
 )
 
 // PATH_MAX is the maximum allowed path length on Linux.
@@ -47,16 +45,9 @@ func Faccessat(dirfd int, path string, mode uint32) error {
 // Openat wraps the Openat syscall.
 // Retries on EINTR.
 func Openat(dirfd int, path string, flags int, mode uint32) (fd int, err error) {
-	if flags&syscall.O_CREAT != 0 {
-		// O_CREAT should be used with O_EXCL. O_NOFOLLOW has no effect with O_EXCL.
-		if flags&syscall.O_EXCL == 0 {
-			tlog.Warn.Printf("Openat: O_CREAT without O_EXCL: flags = %#x", flags)
-			flags |= syscall.O_EXCL
-		}
-	} else {
+	if flags&syscall.O_CREAT == 0 {
 		// If O_CREAT is not used, we should use O_NOFOLLOW
 		if flags&syscall.O_NOFOLLOW == 0 {
-			tlog.Warn.Printf("Openat: O_NOFOLLOW missing: flags = %#x", flags)
 			flags |= syscall.O_NOFOLLOW
 		}
 	}
@@ -70,7 +61,6 @@ func Openat(dirfd int, path string, flags int, mode uint32) (fd int, err error) 
 func Fchownat(dirfd int, path string, uid int, gid int, flags int) (err error) {
 	// Why would we ever want to call this without AT_SYMLINK_NOFOLLOW?
 	if flags&unix.AT_SYMLINK_NOFOLLOW == 0 {
-		tlog.Warn.Printf("Fchownat: adding missing AT_SYMLINK_NOFOLLOW flag")
 		flags |= unix.AT_SYMLINK_NOFOLLOW
 	}
 	return unix.Fchownat(dirfd, path, uid, gid, flags)
@@ -81,7 +71,6 @@ func Fchownat(dirfd int, path string, uid int, gid int, flags int) (err error) {
 func Fstatat(dirfd int, path string, stat *unix.Stat_t, flags int) (err error) {
 	// Why would we ever want to call this without AT_SYMLINK_NOFOLLOW?
 	if flags&unix.AT_SYMLINK_NOFOLLOW == 0 {
-		tlog.Warn.Printf("Fstatat: adding missing AT_SYMLINK_NOFOLLOW flag")
 		flags |= unix.AT_SYMLINK_NOFOLLOW
 	}
 	err = retryEINTR(func() error {

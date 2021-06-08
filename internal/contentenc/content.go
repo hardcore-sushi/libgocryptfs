@@ -4,23 +4,22 @@ package contentenc
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"log"
 	"runtime"
 	"sync"
 
-	"github.com/hanwen/go-fuse/v2/fuse"
-
-	"github.com/rfjakob/gocryptfs/internal/cryptocore"
-	"github.com/rfjakob/gocryptfs/internal/stupidgcm"
-	"github.com/rfjakob/gocryptfs/internal/tlog"
+	"../cryptocore"
+	"../stupidgcm"
 )
 
 // NonceMode determines how nonces are created.
 type NonceMode int
 
 const (
+	//value from FUSE doc
+	MAX_KERNEL_WRITE = 128 * 1024
+
 	// DefaultBS is the default plaintext block size
 	DefaultBS = 4096
 	// DefaultIVBits is the default length of IV, in bits.
@@ -73,17 +72,17 @@ type ContentEnc struct {
 
 // New returns an initialized ContentEnc instance.
 func New(cc *cryptocore.CryptoCore, plainBS uint64, forceDecode bool) *ContentEnc {
-	if fuse.MAX_KERNEL_WRITE%plainBS != 0 {
-		log.Panicf("unaligned MAX_KERNEL_WRITE=%d", fuse.MAX_KERNEL_WRITE)
+	if MAX_KERNEL_WRITE%plainBS != 0 {
+		log.Panicf("unaligned MAX_KERNEL_WRITE=%d", MAX_KERNEL_WRITE)
 	}
 	cipherBS := plainBS + uint64(cc.IVLen) + cryptocore.AuthTagLen
 	// Take IV and GHASH overhead into account.
-	cReqSize := int(fuse.MAX_KERNEL_WRITE / plainBS * cipherBS)
+	cReqSize := int(MAX_KERNEL_WRITE / plainBS * cipherBS)
 	// Unaligned reads (happens during fsck, could also happen with O_DIRECT?)
 	// touch one additional ciphertext and plaintext block. Reserve space for the
 	// extra block.
 	cReqSize += int(cipherBS)
-	pReqSize := fuse.MAX_KERNEL_WRITE + int(plainBS)
+	pReqSize := MAX_KERNEL_WRITE + int(plainBS)
 	c := &ContentEnc{
 		cryptoCore:   cc,
 		plainBS:      plainBS,
@@ -120,9 +119,7 @@ func (be *ContentEnc) DecryptBlocks(ciphertext []byte, firstBlockNo uint64, file
 		var pBlock []byte
 		pBlock, err = be.DecryptBlock(cBlock, blockNo, fileID)
 		if err != nil {
-			if be.forceDecode && err == stupidgcm.ErrAuth {
-				tlog.Warn.Printf("DecryptBlocks: authentication failure in block #%d, overridden by forcedecode", firstBlockNo)
-			} else {
+			if !(be.forceDecode && err == stupidgcm.ErrAuth) {
 				break
 			}
 		}
@@ -163,12 +160,10 @@ func (be *ContentEnc) DecryptBlock(ciphertext []byte, blockNo uint64, fileID []b
 
 	// All-zero block?
 	if bytes.Equal(ciphertext, be.allZeroBlock) {
-		tlog.Debug.Printf("DecryptBlock: file hole encountered")
 		return make([]byte, be.plainBS), nil
 	}
 
 	if len(ciphertext) < be.cryptoCore.IVLen {
-		tlog.Warn.Printf("DecryptBlock: Block is too short: %d bytes", len(ciphertext))
 		return nil, errors.New("Block is too short")
 	}
 
@@ -180,7 +175,6 @@ func (be *ContentEnc) DecryptBlock(ciphertext []byte, blockNo uint64, fileID []b
 		// http://www.spinics.net/lists/kernel/msg2370127.html
 		return nil, errors.New("all-zero nonce")
 	}
-	ciphertextOrig := ciphertext
 	ciphertext = ciphertext[be.cryptoCore.IVLen:]
 
 	// Decrypt
@@ -190,8 +184,6 @@ func (be *ContentEnc) DecryptBlock(ciphertext []byte, blockNo uint64, fileID []b
 	plaintext, err := be.cryptoCore.AEADCipher.Open(plaintext, nonce, ciphertext, aData)
 
 	if err != nil {
-		tlog.Debug.Printf("DecryptBlock: %s, len=%d", err.Error(), len(ciphertextOrig))
-		tlog.Debug.Println(hex.Dump(ciphertextOrig))
 		if be.forceDecode && err == stupidgcm.ErrAuth {
 			return plaintext, err
 		}

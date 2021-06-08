@@ -7,9 +7,8 @@ import (
 
 	"golang.org/x/crypto/scrypt"
 
-	"github.com/rfjakob/gocryptfs/internal/cryptocore"
-	"github.com/rfjakob/gocryptfs/internal/exitcodes"
-	"github.com/rfjakob/gocryptfs/internal/tlog"
+	"../cryptocore"
+	"../exitcodes"
 )
 
 const (
@@ -84,23 +83,18 @@ func (s *ScryptKDF) LogN() int {
 func (s *ScryptKDF) validateParams() {
 	minN := 1 << scryptMinLogN
 	if s.N < minN {
-		tlog.Fatal.Println("Fatal: scryptn below 10 is too low to make sense")
 		os.Exit(exitcodes.ScryptParams)
 	}
 	if s.R < scryptMinR {
-		tlog.Fatal.Printf("Fatal: scrypt parameter R below minimum: value=%d, min=%d", s.R, scryptMinR)
 		os.Exit(exitcodes.ScryptParams)
 	}
 	if s.P < scryptMinP {
-		tlog.Fatal.Printf("Fatal: scrypt parameter P below minimum: value=%d, min=%d", s.P, scryptMinP)
 		os.Exit(exitcodes.ScryptParams)
 	}
 	if len(s.Salt) < scryptMinSaltLen {
-		tlog.Fatal.Printf("Fatal: scrypt salt length below minimum: value=%d, min=%d", len(s.Salt), scryptMinSaltLen)
 		os.Exit(exitcodes.ScryptParams)
 	}
 	if s.KeyLen < cryptocore.KeyLen {
-		tlog.Fatal.Printf("Fatal: scrypt parameter KeyLen below minimum: value=%d, min=%d", s.KeyLen, cryptocore.KeyLen)
 		os.Exit(exitcodes.ScryptParams)
 	}
 }

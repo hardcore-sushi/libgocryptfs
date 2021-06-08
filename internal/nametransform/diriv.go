@@ -8,9 +8,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/rfjakob/gocryptfs/internal/cryptocore"
-	"github.com/rfjakob/gocryptfs/internal/syscallcompat"
-	"github.com/rfjakob/gocryptfs/internal/tlog"
+	"../cryptocore"
+	"../syscallcompat"
 )
 
 const (
@@ -68,7 +67,6 @@ func WriteDirIVAt(dirfd int) error {
 	// https://github.com/rfjakob/gocryptfs/commit/7d38f80a78644c8ec4900cc990bfb894387112ed
 	fd, err := syscallcompat.Openat(dirfd, DirIVFilename, os.O_WRONLY|os.O_CREATE|os.O_EXCL, dirivPerms)
 	if err != nil {
-		tlog.Warn.Printf("WriteDirIV: Openat: %v", err)
 		return err
 	}
 	// Wrap the fd in an os.File - we need the write retry logic.
@@ -77,16 +75,12 @@ func WriteDirIVAt(dirfd int) error {
 	if err != nil {
 		f.Close()
 		// It is normal to get ENOSPC here
-		if !syscallcompat.IsENOSPC(err) {
-			tlog.Warn.Printf("WriteDirIV: Write: %v", err)
-		}
 		// Delete incomplete gocryptfs.diriv file
 		syscallcompat.Unlinkat(dirfd, DirIVFilename, 0)
 		return err
 	}
 	err = f.Close()
 	if err != nil {
-		tlog.Warn.Printf("WriteDirIV: Close: %v", err)
 		// Delete incomplete gocryptfs.diriv file
 		syscallcompat.Unlinkat(dirfd, DirIVFilename, 0)
 		return err

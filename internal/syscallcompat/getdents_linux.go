@@ -13,10 +13,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/hanwen/go-fuse/v2/fuse"
-
-	"github.com/rfjakob/gocryptfs/internal/tlog"
 )
 
 const sizeofDirent = int(unsafe.Sizeof(unix.Dirent{}))
@@ -26,8 +22,13 @@ const sizeofDirent = int(unsafe.Sizeof(unix.Dirent{}))
 // See https://github.com/rfjakob/gocryptfs/issues/197 for details.
 const maxReclen = 280
 
+type DirEntry struct {
+	Name string
+	Mode uint32
+}
+
 // getdents wraps unix.Getdents and converts the result to []fuse.DirEntry.
-func getdents(fd int) (entries []fuse.DirEntry, entriesSpecial []fuse.DirEntry, err error) {
+func getdents(fd int) (entries []DirEntry, entriesSpecial []DirEntry, err error) {
 	// Collect syscall result in smartBuf.
 	// "bytes.Buffer" is smart about expanding the capacity and avoids the
 	// exponential runtime of simple append().
@@ -43,7 +44,6 @@ func getdents(fd int) (entries []fuse.DirEntry, entriesSpecial []fuse.DirEntry, 
 			continue
 		} else if err != nil {
 			if smartBuf.Len() > 0 {
-				tlog.Warn.Printf("warning: unix.Getdents returned errno %d in the middle of data ( https://github.com/rfjakob/gocryptfs/issues/483 )", err.(syscall.Errno))
 				return nil, nil, syscall.EIO
 			}
 			return nil, nil, err
@@ -63,14 +63,10 @@ func getdents(fd int) (entries []fuse.DirEntry, entriesSpecial []fuse.DirEntry, 
 	for offset < len(buf) {
 		s := *(*unix.Dirent)(unsafe.Pointer(&buf[offset]))
 		if s.Reclen == 0 {
-			tlog.Warn.Printf("Getdents: corrupt entry #%d: Reclen=0 at offset=%d. Returning EBADR",
-				numEntries, offset)
 			// EBADR = Invalid request descriptor
 			return nil, nil, syscall.EBADR
 		}
 		if int(s.Reclen) > maxReclen {
-			tlog.Warn.Printf("Getdents: corrupt entry #%d: Reclen=%d > %d. Returning EBADR",
-				numEntries, s.Reclen, maxReclen)
 			return nil, nil, syscall.EBADR
 		}
 		offset += int(s.Reclen)
@@ -80,7 +76,7 @@ func getdents(fd int) (entries []fuse.DirEntry, entriesSpecial []fuse.DirEntry, 
 	// Note: syscall.ParseDirent() only returns the names,
 	// we want all the data, so we have to implement
 	// it on our own.
-	entries = make([]fuse.DirEntry, 0, numEntries)
+	entries = make([]DirEntry, 0, numEntries)
 	offset = 0
 	for offset < len(buf) {
 		s := *(*unix.Dirent)(unsafe.Pointer(&buf[offset]))
@@ -91,8 +87,7 @@ func getdents(fd int) (entries []fuse.DirEntry, entriesSpecial []fuse.DirEntry, 
 		offset += int(s.Reclen)
 		if name == "." || name == ".." {
 			// These are always directories, no need to call convertDType.
-			entriesSpecial = append(entriesSpecial, fuse.DirEntry{
-				Ino:  s.Ino,
+			entriesSpecial = append(entriesSpecial, DirEntry{
 				Mode: syscall.S_IFDIR,
 				Name: name,
 			})
@@ -104,8 +99,7 @@ func getdents(fd int) (entries []fuse.DirEntry, entriesSpecial []fuse.DirEntry, 
 			// and go on.
 			continue
 		}
-		entries = append(entries, fuse.DirEntry{
-			Ino:  s.Ino,
+		entries = append(entries, DirEntry{
 			Mode: mode,
 			Name: name,
 		})
@@ -124,7 +118,6 @@ func getdentsName(s unix.Dirent) (string, error) {
 		}
 	}
 	if l < 1 {
-		tlog.Warn.Printf("Getdents: invalid name length l=%d. Returning EBADR", l)
 		// EBADR = Invalid request descriptor
 		return "", syscall.EBADR
 	}
@@ -139,18 +132,8 @@ func getdentsName(s unix.Dirent) (string, error) {
 var dtUnknownWarnOnce sync.Once
 
 func dtUnknownWarn(dirfd int) {
-	const XFS_SUPER_MAGIC = 0x58465342 // From man 2 statfs
 	var buf syscall.Statfs_t
-	err := syscall.Fstatfs(dirfd, &buf)
-	if err == nil && buf.Type == XFS_SUPER_MAGIC {
-		// Old XFS filesystems always return DT_UNKNOWN. Downgrade the message
-		// to "info" level if we are on XFS.
-		// https://github.com/rfjakob/gocryptfs/issues/267
-		tlog.Info.Printf("Getdents: convertDType: received DT_UNKNOWN, fstype=xfs, falling back to stat")
-	} else {
-		tlog.Warn.Printf("Getdents: convertDType: received DT_UNKNOWN, fstype=%#x, falling back to stat",
-			buf.Type)
-	}
+	syscall.Fstatfs(dirfd, &buf)
 }
 
 // convertDType converts a Dirent.Type to at Stat_t.Mode value.

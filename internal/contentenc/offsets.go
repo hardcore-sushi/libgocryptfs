@@ -2,8 +2,6 @@ package contentenc
 
 import (
 	"log"
-
-	"github.com/rfjakob/gocryptfs/internal/tlog"
 )
 
 // Contentenc methods that translate offsets between ciphertext and plaintext
@@ -44,12 +42,10 @@ func (be *ContentEnc) CipherSizeToPlainSize(cipherSize uint64) uint64 {
 
 	if cipherSize == HeaderLen {
 		// This can happen between createHeader() and Write() and is harmless.
-		tlog.Debug.Printf("cipherSize %d == header size: interrupted write?\n", cipherSize)
 		return 0
 	}
 
 	if cipherSize < HeaderLen {
-		tlog.Warn.Printf("cipherSize %d < header size %d: corrupt file\n", cipherSize, HeaderLen)
 		return 0
 	}
 
@@ -58,7 +54,6 @@ func (be *ContentEnc) CipherSizeToPlainSize(cipherSize uint64) uint64 {
 	lastBlockSize := (cipherSize - HeaderLen) % be.cipherBS
 	if lastBlockSize > 0 && lastBlockSize <= be.BlockOverhead() {
 		tmp := cipherSize - lastBlockSize + be.BlockOverhead() + 1
-		tlog.Warn.Printf("cipherSize %d: incomplete last block (%d bytes), padding to %d bytes", cipherSize, lastBlockSize, tmp)
 		cipherSize = tmp
 	}
 
@@ -69,7 +64,6 @@ func (be *ContentEnc) CipherSizeToPlainSize(cipherSize uint64) uint64 {
 	overhead := be.BlockOverhead()*blockCount + HeaderLen
 
 	if overhead > cipherSize {
-		tlog.Warn.Printf("cipherSize %d < overhead %d: corrupt file\n", cipherSize, overhead)
 		return 0
 	}
 

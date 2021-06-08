@@ -4,8 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-
-	"github.com/rfjakob/gocryptfs/internal/tlog"
 )
 
 // OpenDirNofollow opens the dir at "relPath" in a way that is secure against
@@ -16,11 +14,9 @@ import (
 // Retries on EINTR.
 func OpenDirNofollow(baseDir string, relPath string) (fd int, err error) {
 	if !filepath.IsAbs(baseDir) {
-		tlog.Warn.Printf("BUG: OpenDirNofollow called with relative baseDir=%q", baseDir)
 		return -1, syscall.EINVAL
 	}
 	if filepath.IsAbs(relPath) {
-		tlog.Warn.Printf("BUG: OpenDirNofollow called with absolute relPath=%q", relPath)
 		return -1, syscall.EINVAL
 	}
 	// Open the base dir (following symlinks)
