@@ -74,7 +74,8 @@ func registerNewVolume(rootCipherDir string, masterkey []byte, cf *configfile.Co
 	forcedecode := false
 	newVolume.cryptoCore = cryptocore.New(masterkey, cryptoBackend, contentenc.DefaultIVBits, true, forcedecode)
 	newVolume.contentEnc = contentenc.New(newVolume.cryptoCore, contentenc.DefaultBS, forcedecode)
-	newVolume.nameTransform = nametransform.New(newVolume.cryptoCore.EMECipher, true, true)
+	var badname []string
+	newVolume.nameTransform = nametransform.New(newVolume.cryptoCore.EMECipher, true, true, badname)
 
 	//copying rootCipherDir
 	var grcd strings.Builder

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"syscall"
 
 	"../cryptocore"
@@ -86,31 +85,4 @@ func WriteDirIVAt(dirfd int) error {
 		return err
 	}
 	return nil
-}
-
-// encryptAndHashName encrypts "name" and hashes it to a longname if it is
-// too long.
-// Returns ENAMETOOLONG if "name" is longer than 255 bytes.
-func (be *NameTransform) EncryptAndHashName(name string, iv []byte) (string, error) {
-	// Prevent the user from creating files longer than 255 chars.
-	if len(name) > NameMax {
-		return "", syscall.ENAMETOOLONG
-	}
-	cName, err := be.EncryptName(name, iv)
-	if err != nil {
-		return "", err
-	}
-	if be.longNames && len(cName) > NameMax {
-		return be.HashLongName(cName), nil
-	}
-	return cName, nil
-}
-
-// Dir is like filepath.Dir but returns "" instead of ".".
-func Dir(path string) string {
-	d := filepath.Dir(path)
-	if d == "." {
-		return ""
-	}
-	return d
 }

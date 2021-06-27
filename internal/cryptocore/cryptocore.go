@@ -35,6 +35,19 @@ const (
 	BackendAESSIV AEADTypeEnum = 5
 )
 
+func (a AEADTypeEnum) String() string {
+	switch a {
+	case BackendOpenSSL:
+		return "BackendOpenSSL"
+	case BackendGoGCM:
+		return "BackendGoGCM"
+	case BackendAESSIV:
+		return "BackendAESSIV"
+	default:
+		return fmt.Sprintf("%d", a)
+	}
+}
+
 // CryptoCore is the low level crypto implementation.
 type CryptoCore struct {
 	// EME is used for filename encryption.

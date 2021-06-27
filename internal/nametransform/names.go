@@ -15,21 +15,6 @@ const (
 	NameMax = 255
 )
 
-// NameTransformer is an interface used to transform filenames.
-type NameTransformer interface {
-	DecryptName(cipherName string, iv []byte) (string, error)
-	EncryptName(plainName string, iv []byte) (string, error)
-	EncryptAndHashName(name string, iv []byte) (string, error)
-	// HashLongName - take the hash of a long string "name" and return
-	// "gocryptfs.longname.[sha256]"
-	//
-	// This function does not do any I/O.
-	HashLongName(name string) string
-	WriteLongNameAt(dirfd int, hashName string, plainName string) error
-	B64EncodeToString(src []byte) string
-	B64DecodeString(s string) ([]byte, error)
-}
-
 // NameTransform is used to transform filenames.
 type NameTransform struct {
 	emeCipher *eme.EMECipher
@@ -38,19 +23,20 @@ type NameTransform struct {
 	// on the Raw64 feature flag
 	B64 *base64.Encoding
 	// Patterns to bypass decryption
-	BadnamePatterns []string
+	badnamePatterns []string
 }
 
 // New returns a new NameTransform instance.
-func New(e *eme.EMECipher, longNames bool, raw64 bool) *NameTransform {
+func New(e *eme.EMECipher, longNames bool, raw64 bool, badname []string) *NameTransform {
 	b64 := base64.URLEncoding
 	if raw64 {
 		b64 = base64.RawURLEncoding
 	}
 	return &NameTransform{
-		emeCipher: e,
-		longNames: longNames,
-		B64:       b64,
+		emeCipher:       e,
+		longNames:       longNames,
+		B64:             b64,
+		badnamePatterns: badname,
 	}
 }
 
@@ -58,22 +44,8 @@ func New(e *eme.EMECipher, longNames bool, raw64 bool) *NameTransform {
 // filename "cipherName", and failing that checks if it can be bypassed
 func (n *NameTransform) DecryptName(cipherName string, iv []byte) (string, error) {
 	res, err := n.decryptName(cipherName, iv)
-	if err != nil {
-		for _, pattern := range n.BadnamePatterns {
-			match, err := filepath.Match(pattern, cipherName)
-			if err == nil && match { // Pattern should have been validated already
-				// Find longest decryptable substring
-				// At least 16 bytes due to AES --> at least 22 characters in base64
-				nameMin := n.B64.EncodedLen(aes.BlockSize)
-				for charpos := len(cipherName) - 1; charpos >= nameMin; charpos-- {
-					res, err = n.decryptName(cipherName[:charpos], iv)
-					if err == nil {
-						return res + cipherName[charpos:] + " GOCRYPTFS_BAD_NAME", nil
-					}
-				}
-				return cipherName + " GOCRYPTFS_BAD_NAME", nil
-			}
-		}
+	if err != nil && n.HaveBadnamePatterns() {
+		return n.decryptBadname(cipherName, iv)
 	}
 	return res, err
 }
@@ -119,6 +91,24 @@ func (n *NameTransform) EncryptName(plainName string, iv []byte) (cipherName64 s
 	return cipherName64, nil
 }
 
+// EncryptAndHashName encrypts "name" and hashes it to a longname if it is
+// too long.
+// Returns ENAMETOOLONG if "name" is longer than 255 bytes.
+func (be *NameTransform) EncryptAndHashName(name string, iv []byte) (string, error) {
+	// Prevent the user from creating files longer than 255 chars.
+	if len(name) > NameMax {
+		return "", syscall.ENAMETOOLONG
+	}
+	cName, err := be.EncryptName(name, iv)
+	if err != nil {
+		return "", err
+	}
+	if be.longNames && len(cName) > NameMax {
+		return be.HashLongName(cName), nil
+	}
+	return cName, nil
+}
+
 // B64EncodeToString returns a Base64-encoded string
 func (n *NameTransform) B64EncodeToString(src []byte) string {
 	return n.B64.EncodeToString(src)
@@ -127,4 +117,13 @@ func (n *NameTransform) B64EncodeToString(src []byte) string {
 // B64DecodeString decodes a Base64-encoded string
 func (n *NameTransform) B64DecodeString(s string) ([]byte, error) {
 	return n.B64.DecodeString(s)
+}
+
+// Dir is like filepath.Dir but returns "" instead of ".".
+func Dir(path string) string {
+	d := filepath.Dir(path)
+	if d == "." {
+		return ""
+	}
+	return d
 }
