@@ -172,7 +172,7 @@ func isSymlink(mode uint32) bool { return (mode & syscall.S_IFMT) == syscall.S_I
 // Handles regular files & symlinks (and finds out what is what by looking at
 // `out.Mode`).
 func (volume *Volume) translateSize(dirfd int, cName string, st *syscall.Stat_t) uint64 {
-	var size uint64
+	size := uint64(st.Size)
 	if isRegular(st.Mode) {
 		size = volume.contentEnc.CipherSizeToPlainSize(uint64(st.Size))
 	} else if isSymlink(st.Mode) {
