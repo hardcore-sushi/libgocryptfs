@@ -124,7 +124,7 @@ func (n *NameTransform) WriteLongNameAt(dirfd int, hashName string, plainName st
 	plainName = filepath.Base(plainName)
 
 	// Encrypt the basename
-	dirIV, err := ReadDirIVAt(dirfd)
+	dirIV, err := n.ReadDirIVAt(dirfd)
 	if err != nil {
 		return err
 	}

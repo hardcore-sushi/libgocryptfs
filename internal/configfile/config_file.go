@@ -5,9 +5,7 @@ package configfile
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"log"
 	"syscall"
 
 	"os"
@@ -60,64 +58,66 @@ type ConfFile struct {
 	filename string
 }
 
-// randBytesDevRandom gets "n" random bytes from /dev/random or panics
-func randBytesDevRandom(n int) []byte {
-	f, err := os.Open("/dev/random")
-	if err != nil {
-		log.Panic("Failed to open /dev/random: " + err.Error())
-	}
-	defer f.Close()
-	b := make([]byte, n)
-	_, err = io.ReadFull(f, b)
-	if err != nil {
-		log.Panic("Failed to read random bytes: " + err.Error())
-	}
-	return b
+// CreateArgs exists because the argument list to Create became too long.
+type CreateArgs struct {
+	Filename           string
+	Password           []byte
+	PlaintextNames     bool
+	LogN               int
+	Creator            string
+	AESSIV             bool
+	DeterministicNames bool
+	XChaCha20Poly1305  bool
 }
 
 // Create - create a new config with a random key encrypted with
-// "password" and write it to "filename".
-// Uses scrypt with cost parameter logN.
-func Create(filename string, password []byte, plaintextNames bool,
-	logN int, creator string, aessiv bool, devrandom bool, fido2CredentialID []byte, fido2HmacSalt []byte) error {
-	var cf ConfFile
-	cf.filename = filename
-	cf.Creator = creator
-	cf.Version = contentenc.CurrentVersion
-
-	// Set feature flags
-	cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[FlagGCMIV128])
-	cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[FlagHKDF])
-	if plaintextNames {
-		cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[FlagPlaintextNames])
+// "Password" and write it to "Filename".
+// Uses scrypt with cost parameter "LogN".
+func Create(args *CreateArgs) error {
+	cf := ConfFile{
+		filename: args.Filename,
+		Creator:  args.Creator,
+		Version:  contentenc.CurrentVersion,
+	}
+	// Feature flags
+	cf.setFeatureFlag(FlagHKDF)
+	if args.XChaCha20Poly1305 {
+		cf.setFeatureFlag(FlagXChaCha20Poly1305)
 	} else {
-		cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[FlagDirIV])
-		cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[FlagEMENames])
-		cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[FlagLongNames])
-		cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[FlagRaw64])
+		// 128-bit IVs are mandatory for AES-GCM (default is 96!) and AES-SIV,
+		// XChaCha20Poly1305 uses even an even longer IV of 192 bits.
+		cf.setFeatureFlag(FlagGCMIV128)
 	}
-	if aessiv {
-		cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[FlagAESSIV])
-	}
-	if len(fido2CredentialID) > 0 {
-		cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[FlagFIDO2])
-		cf.FIDO2 = &FIDO2Params{
-			CredentialID: fido2CredentialID,
-			HMACSalt:     fido2HmacSalt,
+	if args.PlaintextNames {
+		cf.setFeatureFlag(FlagPlaintextNames)
+	} else {
+		if !args.DeterministicNames {
+			cf.setFeatureFlag(FlagDirIV)
 		}
+		cf.setFeatureFlag(FlagEMENames)
+		cf.setFeatureFlag(FlagLongNames)
+		cf.setFeatureFlag(FlagRaw64)
+	}
+	if args.AESSIV {
+		cf.setFeatureFlag(FlagAESSIV)
+	}
+	// Catch bugs and invalid cli flag combinations early
+	cf.ScryptObject = NewScryptKDF(args.LogN)
+	if err := cf.Validate(); err != nil {
+		return err
+	}
+	// Catch bugs and invalid cli flag combinations early
+	cf.ScryptObject = NewScryptKDF(args.LogN)
+	if err := cf.Validate(); err != nil {
+		return err
 	}
 	{
 		// Generate new random master key
-		var key []byte
-		if devrandom {
-			key = randBytesDevRandom(cryptocore.KeyLen)
-		} else {
-			key = cryptocore.RandBytes(cryptocore.KeyLen)
-		}
+		key := cryptocore.RandBytes(cryptocore.KeyLen)
 		// Encrypt it using the password
 		// This sets ScryptObject and EncryptedKey
 		// Note: this looks at the FeatureFlags, so call it AFTER setting them.
-		cf.EncryptKey(key, password, logN, false)
+		cf.EncryptKey(key, args.Password, args.LogN, false)
 		for i := range key {
 			key[i] = 0
 		}
@@ -175,37 +175,20 @@ func Load(filename string) (*ConfFile, error) {
 		return nil, err
 	}
 
-	if cf.Version != contentenc.CurrentVersion {
-		return nil, fmt.Errorf("Unsupported on-disk format %d", cf.Version)
-	}
-
-	// Check that all set feature flags are known
-	for _, flag := range cf.FeatureFlags {
-		if !cf.isFeatureFlagKnown(flag) {
-			return nil, fmt.Errorf("Unsupported feature flag %q", flag)
-		}
-	}
-
-	// Check that all required feature flags are set
-	var requiredFlags []flagIota
-	if cf.IsFeatureFlagSet(FlagPlaintextNames) {
-		requiredFlags = requiredFlagsPlaintextNames
-	} else {
-		requiredFlags = requiredFlagsNormal
-	}
-	deprecatedFs := false
-	for _, i := range requiredFlags {
-		if !cf.IsFeatureFlagSet(i) {
-			fmt.Fprintf(os.Stderr, "Required feature flag %q is missing\n", knownFlags[i])
-			deprecatedFs = true
-		}
-	}
-	if deprecatedFs {
-		return nil, exitcodes.NewErr("Deprecated filesystem", exitcodes.DeprecatedFS)
+	if err := cf.Validate(); err != nil {
+		return nil, exitcodes.NewErr(err.Error(), exitcodes.DeprecatedFS)
 	}
 
 	// All good
 	return &cf, nil
+}
+
+func (cf *ConfFile) setFeatureFlag(flag flagIota) {
+	if cf.IsFeatureFlagSet(flag) {
+		// Already set, ignore
+		return
+	}
+	cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[flag])
 }
 
 // DecryptMasterKey decrypts the masterkey stored in cf.EncryptedKey using
@@ -296,6 +279,9 @@ func (cf *ConfFile) GetMasterkey(password, givenScryptHash, returnedScryptHashBu
 // then rename over "filename".
 // This way a password change atomically replaces the file.
 func (cf *ConfFile) WriteFile() error {
+	if err := cf.Validate(); err != nil {
+		return err
+	}
 	tmp := cf.filename + ".tmp"
 	// 0400 permissions: gocryptfs.conf should be kept secret and never be written to.
 	fd, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
@@ -315,7 +301,7 @@ func (cf *ConfFile) WriteFile() error {
 	err = fd.Sync()
 	if err != nil {
 		// This can happen on network drives: FRITZ.NAS mounted on MacOS returns
-		// "operation not supported": https://github.com/rfjakob/gocryptfs/issues/390
+		// "operation not supported": https://github.com/rfjakob/gocryptfs/v2/issues/390
 		// Try sync instead
 		syscall.Sync()
 	}
@@ -339,4 +325,19 @@ func getKeyEncrypter(scryptHash []byte, useHKDF bool) *contentenc.ContentEnc {
 	cc := cryptocore.New(scryptHash, cryptocore.BackendGoGCM, IVLen, useHKDF, false)
 	ce := contentenc.New(cc, 4096, false)
 	return ce
+}
+
+// ContentEncryption tells us which content encryption algorithm is selected
+func (cf *ConfFile) ContentEncryption() (algo cryptocore.AEADTypeEnum, err error) {
+	if err := cf.Validate(); err != nil {
+		return cryptocore.AEADTypeEnum{}, err
+	}
+	if cf.IsFeatureFlagSet(FlagXChaCha20Poly1305) {
+		return cryptocore.BackendXChaCha20Poly1305, nil
+	}
+	if cf.IsFeatureFlagSet(FlagAESSIV) {
+		return cryptocore.BackendAESSIV, nil
+	}
+	// If neither AES-SIV nor XChaCha are selected, we must be using AES-GCM
+	return cryptocore.BackendGoGCM, nil
 }

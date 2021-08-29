@@ -50,7 +50,7 @@ func (volume *Volume) openBackingDir(relPath string) (dirfd int, cName string, e
 	// Walk the directory tree
 	parts := strings.Split(relPath, "/")
 	for i, name := range parts {
-		iv, err := nametransform.ReadDirIVAt(dirfd)
+		iv, err := volume.nameTransform.ReadDirIVAt(dirfd)
 		if err != nil {
 			syscall.Close(dirfd)
 			return -1, "", err
@@ -112,7 +112,7 @@ func (volume *Volume) prepareAtSyscall(path string) (dirfd int, cName string, er
 	// Cache store
 	if !volume.plainTextNames {
 		// TODO: openBackingDir already calls ReadDirIVAt(). Avoid duplicate work?
-		iv, err := nametransform.ReadDirIVAt(dirfd)
+		iv, err := volume.nameTransform.ReadDirIVAt(dirfd)
 		if err != nil {
 			syscall.Close(dirfd)
 			return -1, "", err

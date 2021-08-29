@@ -60,7 +60,7 @@ func gcf_list_dir(sessionID int, dirName string) (*C.char, *C.int, C.int) {
 	var cachedIV []byte
 	if !OpenedVolumes[sessionID].plainTextNames {
 		// Read the DirIV from disk
-		cachedIV, err = nametransform.ReadDirIVAt(fd)
+		cachedIV, err = volume.nameTransform.ReadDirIVAt(fd)
 		if err != nil {
 			return nil, nil, 0
 		}

@@ -19,7 +19,7 @@ const sizeofDirent = int(unsafe.Sizeof(unix.Dirent{}))
 
 // maxReclen sanity check: Reclen should never be larger than this.
 // Due to padding between entries, it is 280 even on 32-bit architectures.
-// See https://github.com/rfjakob/gocryptfs/issues/197 for details.
+// See https://github.com/rfjakob/gocryptfs/v2/issues/197 for details.
 const maxReclen = 280
 
 type DirEntry struct {

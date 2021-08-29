@@ -75,7 +75,7 @@ func registerNewVolume(rootCipherDir string, masterkey []byte, cf *configfile.Co
 	newVolume.cryptoCore = cryptocore.New(masterkey, cryptoBackend, contentenc.DefaultIVBits, true, forcedecode)
 	newVolume.contentEnc = contentenc.New(newVolume.cryptoCore, contentenc.DefaultBS, forcedecode)
 	var badname []string
-	newVolume.nameTransform = nametransform.New(newVolume.cryptoCore.EMECipher, true, true, badname)
+	newVolume.nameTransform = nametransform.New(newVolume.cryptoCore.EMECipher, true, true, badname, false)
 
 	//copying rootCipherDir
 	var grcd strings.Builder
@@ -156,7 +156,16 @@ func gcf_change_password(rootCipherDir string, oldPassword, givenScryptHash, new
 
 //export gcf_create_volume
 func gcf_create_volume(rootCipherDir string, password []byte, plaintextNames bool, logN int, creator string) bool {
-	err := configfile.Create(filepath.Join(rootCipherDir, configfile.ConfDefaultName), password, plaintextNames, logN, creator, false, false, nil, nil)
+	err := configfile.Create(&configfile.CreateArgs{
+		Filename:           filepath.Join(rootCipherDir, configfile.ConfDefaultName),
+		Password:           password,
+		PlaintextNames:     plaintextNames,
+		LogN:               logN,
+		Creator:            creator,
+		AESSIV:             false,
+		DeterministicNames: false,
+		XChaCha20Poly1305:  false,
+	})
 	if err == nil {
 		if plaintextNames {
 			return true

@@ -13,9 +13,6 @@ import (
 	"../stupidgcm"
 )
 
-// NonceMode determines how nonces are created.
-type NonceMode int
-
 const (
 	//value from FUSE doc
 	MAX_KERNEL_WRITE = 128 * 1024
@@ -27,15 +24,6 @@ const (
 	// master key in the config file is encrypted with a 96-bit IV for
 	// gocryptfs v1.2 and earlier. v1.3 switched to 128 bit.
 	DefaultIVBits = 128
-
-	_ = iota // skip zero
-	// RandomNonce chooses a random nonce.
-	RandomNonce NonceMode = iota
-	// ReverseDeterministicNonce chooses a deterministic nonce, suitable for
-	// use in reverse mode.
-	ReverseDeterministicNonce NonceMode = iota
-	// ExternalNonce derives a nonce from external sources.
-	ExternalNonce NonceMode = iota
 )
 
 // ContentEnc is used to encipher and decipher file content.
@@ -171,7 +159,7 @@ func (be *ContentEnc) DecryptBlock(ciphertext []byte, blockNo uint64, fileID []b
 	nonce := ciphertext[:be.cryptoCore.IVLen]
 	if bytes.Equal(nonce, be.allZeroNonce) {
 		// Bug in tmpfs?
-		// https://github.com/rfjakob/gocryptfs/issues/56
+		// https://github.com/rfjakob/gocryptfs/v2/issues/56
 		// http://www.spinics.net/lists/kernel/msg2370127.html
 		return nil, errors.New("all-zero nonce")
 	}

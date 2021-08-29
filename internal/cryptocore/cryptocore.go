@@ -6,9 +6,10 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha512"
-	"fmt"
 	"log"
 	"runtime"
+
+	"golang.org/x/crypto/chacha20poly1305"
 
 	"github.com/rfjakob/eme"
 
@@ -17,36 +18,34 @@ import (
 )
 
 const (
-	// KeyLen is the cipher key length in bytes.  32 for AES-256.
+	// KeyLen is the cipher key length in bytes. All backends use 32 bytes.
 	KeyLen = 32
-	// AuthTagLen is the length of a GCM auth tag in bytes.
+	// AuthTagLen is the length of a authentication tag in bytes.
+	// All backends use 16 bytes.
 	AuthTagLen = 16
 )
 
 // AEADTypeEnum indicates the type of AEAD backend in use.
-type AEADTypeEnum int
-
-const (
-	// BackendOpenSSL specifies the OpenSSL backend.
-	BackendOpenSSL AEADTypeEnum = 3
-	// BackendGoGCM specifies the Go based GCM backend.
-	BackendGoGCM AEADTypeEnum = 4
-	// BackendAESSIV specifies an AESSIV backend.
-	BackendAESSIV AEADTypeEnum = 5
-)
-
-func (a AEADTypeEnum) String() string {
-	switch a {
-	case BackendOpenSSL:
-		return "BackendOpenSSL"
-	case BackendGoGCM:
-		return "BackendGoGCM"
-	case BackendAESSIV:
-		return "BackendAESSIV"
-	default:
-		return fmt.Sprintf("%d", a)
-	}
+type AEADTypeEnum struct {
+	Name      string
+	NonceSize int
 }
+
+// BackendOpenSSL specifies the OpenSSL backend.
+// "AES-GCM-256-OpenSSL" in gocryptfs -speed.
+var BackendOpenSSL AEADTypeEnum = AEADTypeEnum{"AES-GCM-256-OpenSSL", 16}
+
+// BackendGoGCM specifies the Go based GCM backend.
+// "AES-GCM-256-Go" in gocryptfs -speed.
+var BackendGoGCM AEADTypeEnum = AEADTypeEnum{"AES-GCM-256-Go", 16}
+
+// BackendAESSIV specifies an AESSIV backend.
+// "AES-SIV-512-Go" in gocryptfs -speed.
+var BackendAESSIV AEADTypeEnum = AEADTypeEnum{"AES-SIV-512-Go", siv_aead.NonceSize}
+
+// BackendXChaCha20Poly1305 specifies XChaCha20-Poly1305-Go.
+// "XChaCha20-Poly1305-Go" in gocryptfs -speed.
+var BackendXChaCha20Poly1305 AEADTypeEnum = AEADTypeEnum{"XChaCha20-Poly1305-Go", chacha20poly1305.NonceSizeX}
 
 // CryptoCore is the low level crypto implementation.
 type CryptoCore struct {
@@ -58,7 +57,8 @@ type CryptoCore struct {
 	AEADBackend AEADTypeEnum
 	// GCM needs unique IVs (nonces)
 	IVGenerator *nonceGenerator
-	IVLen       int
+	// IVLen in bytes
+	IVLen int
 }
 
 // New returns a new CryptoCore object or panics.
@@ -71,10 +71,11 @@ type CryptoCore struct {
 // a config file) or the masterkey (when finally mounting the filesystem).
 func New(key []byte, aeadType AEADTypeEnum, IVBitLen int, useHKDF bool, forceDecode bool) *CryptoCore {
 	if len(key) != KeyLen {
-		log.Panic(fmt.Sprintf("Unsupported key length %d", len(key)))
+		log.Panicf("Unsupported key length of %d bytes", len(key))
 	}
-	// We want the IV size in bytes
-	IVLen := IVBitLen / 8
+	if IVBitLen != 96 && IVBitLen != 128 && IVBitLen != chacha20poly1305.NonceSizeX*8 {
+		log.Panicf("Unsupported IV length of %d bits", IVBitLen)
+	}
 
 	// Initialize EME for filename encryption.
 	var emeCipher *eme.EMECipher
@@ -103,12 +104,14 @@ func New(key []byte, aeadType AEADTypeEnum, IVBitLen int, useHKDF bool, forceDec
 		if useHKDF {
 			gcmKey = hkdfDerive(key, hkdfInfoGCMContent, KeyLen)
 		} else {
+			// Filesystems created by gocryptfs v0.7 through v1.2 don't use HKDF.
+			// Example: tests/example_filesystems/v0.9
 			gcmKey = append([]byte{}, key...)
 		}
 		switch aeadType {
 		case BackendOpenSSL:
-			if IVLen != 16 {
-				log.Panic("stupidgcm only supports 128-bit IVs")
+			if IVBitLen != 128 {
+				log.Panicf("stupidgcm only supports 128-bit IVs, you wanted %d", IVBitLen)
 			}
 			aeadCipher = stupidgcm.New(gcmKey, forceDecode)
 		case BackendGoGCM:
@@ -116,7 +119,7 @@ func New(key []byte, aeadType AEADTypeEnum, IVBitLen int, useHKDF bool, forceDec
 			if err != nil {
 				log.Panic(err)
 			}
-			aeadCipher, err = cipher.NewGCMWithNonceSize(goGcmBlockCipher, IVLen)
+			aeadCipher, err = cipher.NewGCMWithNonceSize(goGcmBlockCipher, IVBitLen/8)
 			if err != nil {
 				log.Panic(err)
 			}
@@ -125,9 +128,9 @@ func New(key []byte, aeadType AEADTypeEnum, IVBitLen int, useHKDF bool, forceDec
 			gcmKey[i] = 0
 		}
 	} else if aeadType == BackendAESSIV {
-		if IVLen != 16 {
-			// SIV supports any nonce size, but we only use 16.
-			log.Panic("AES-SIV must use 16-byte nonces")
+		if IVBitLen != 128 {
+			// SIV supports any nonce size, but we only use 128.
+			log.Panicf("AES-SIV must use 128-bit IVs, you wanted %d", IVBitLen)
 		}
 		// AES-SIV uses 1/2 of the key for authentication, 1/2 for
 		// encryption, so we need a 64-bytes key for AES-256. Derive it from
@@ -144,16 +147,34 @@ func New(key []byte, aeadType AEADTypeEnum, IVBitLen int, useHKDF bool, forceDec
 		for i := range key64 {
 			key64[i] = 0
 		}
+	} else if aeadType == BackendXChaCha20Poly1305 {
+		// We don't support legacy modes with XChaCha20-Poly1305
+		if IVBitLen != chacha20poly1305.NonceSizeX*8 {
+			log.Panicf("XChaCha20-Poly1305 must use 192-bit IVs, you wanted %d", IVBitLen)
+		}
+		if !useHKDF {
+			log.Panic("XChaCha20-Poly1305 must use HKDF, but it is disabled")
+		}
+		derivedKey := hkdfDerive(key, hkdfInfoXChaChaPoly1305Content, chacha20poly1305.KeySize)
+		aeadCipher, err = chacha20poly1305.NewX(derivedKey)
+		if err != nil {
+			log.Panic(err)
+		}
 	} else {
-		log.Panic("unknown backend cipher")
+		log.Panicf("unknown cipher backend %q", aeadType.Name)
+	}
+
+	if aeadCipher.NonceSize()*8 != IVBitLen {
+		log.Panicf("Mismatched aeadCipher.NonceSize*8=%d and IVBitLen=%d bits",
+			aeadCipher.NonceSize()*8, IVBitLen)
 	}
 
 	return &CryptoCore{
 		EMECipher:   emeCipher,
 		AEADCipher:  aeadCipher,
 		AEADBackend: aeadType,
-		IVGenerator: &nonceGenerator{nonceLen: IVLen},
-		IVLen:       IVLen,
+		IVGenerator: &nonceGenerator{nonceLen: IVBitLen / 8},
+		IVLen:       IVBitLen / 8,
 	}
 }
 

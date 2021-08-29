@@ -22,7 +22,11 @@ const (
 // ReadDirIVAt reads "gocryptfs.diriv" from the directory that is opened as "dirfd".
 // Using the dirfd makes it immune to concurrent renames of the directory.
 // Retries on EINTR.
-func ReadDirIVAt(dirfd int) (iv []byte, err error) {
+// If deterministicNames is set it returns an all-zero slice.
+func (n *NameTransform) ReadDirIVAt(dirfd int) (iv []byte, err error) {
+	if n.deterministicNames {
+		return make([]byte, DirIVLen), nil
+	}
 	fdRaw, err := syscallcompat.Openat(dirfd, DirIVFilename,
 		syscall.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
@@ -63,7 +67,7 @@ func WriteDirIVAt(dirfd int) error {
 	iv := cryptocore.RandBytes(DirIVLen)
 	// 0400 permissions: gocryptfs.diriv should never be modified after creation.
 	// Don't use "ioutil.WriteFile", it causes trouble on NFS:
-	// https://github.com/rfjakob/gocryptfs/commit/7d38f80a78644c8ec4900cc990bfb894387112ed
+	// https://github.com/rfjakob/gocryptfs/v2/commit/7d38f80a78644c8ec4900cc990bfb894387112ed
 	fd, err := syscallcompat.Openat(dirfd, DirIVFilename, os.O_WRONLY|os.O_CREATE|os.O_EXCL, dirivPerms)
 	if err != nil {
 		return err
