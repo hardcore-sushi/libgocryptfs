@@ -64,18 +64,25 @@ func registerNewVolume(rootCipherDir string, masterkey []byte, cf *configfile.Co
 
 	newVolume.plainTextNames = cf.IsFeatureFlagSet(configfile.FlagPlaintextNames)
 
-	// Init crypto backend
-	cryptoBackend := cryptocore.BackendGoGCM
-	if cf.IsFeatureFlagSet(configfile.FlagAESSIV) {
-		cryptoBackend = cryptocore.BackendAESSIV
-	} else if stupidgcm.PreferOpenSSL() {
+	cryptoBackend, err := cf.ContentEncryption()
+	if err != nil {
+		return -1
+	}
+	if cryptoBackend == cryptocore.BackendXChaCha20Poly1305 && stupidgcm.PreferOpenSSLXchacha20poly1305() {
+		cryptoBackend = cryptocore.BackendXChaCha20Poly1305OpenSSL
+	} else if cryptoBackend == cryptocore.BackendGoGCM && stupidgcm.PreferOpenSSLAES256GCM() {
 		cryptoBackend = cryptocore.BackendOpenSSL
 	}
-	forcedecode := false
-	newVolume.cryptoCore = cryptocore.New(masterkey, cryptoBackend, contentenc.DefaultIVBits, true, forcedecode)
-	newVolume.contentEnc = contentenc.New(newVolume.cryptoCore, contentenc.DefaultBS, forcedecode)
+	newVolume.cryptoCore = cryptocore.New(masterkey, cryptoBackend, cryptoBackend.NonceSize*8, cf.IsFeatureFlagSet(configfile.FlagHKDF))
+	newVolume.contentEnc = contentenc.New(newVolume.cryptoCore, contentenc.DefaultBS)
 	var badname []string
-	newVolume.nameTransform = nametransform.New(newVolume.cryptoCore.EMECipher, true, true, badname, false)
+	newVolume.nameTransform = nametransform.New(
+		newVolume.cryptoCore.EMECipher,
+		true,
+		cf.IsFeatureFlagSet(configfile.FlagRaw64),
+		badname,
+		!cf.IsFeatureFlagSet(configfile.FlagDirIV),
+	)
 
 	//copying rootCipherDir
 	var grcd strings.Builder
@@ -155,7 +162,16 @@ func gcf_change_password(rootCipherDir string, oldPassword, givenScryptHash, new
 }
 
 //export gcf_create_volume
-func gcf_create_volume(rootCipherDir string, password []byte, plaintextNames bool, logN int, creator string) bool {
+func gcf_create_volume(rootCipherDir string, password []byte, plaintextNames bool, xchacha int8, logN int, creator string) bool {
+	var useXChaCha bool
+	switch xchacha {
+	case 1:
+		useXChaCha = true
+	case 0:
+		useXChaCha = false
+	default:
+		useXChaCha = !stupidgcm.CpuHasAES()
+	}
 	err := configfile.Create(&configfile.CreateArgs{
 		Filename:           filepath.Join(rootCipherDir, configfile.ConfDefaultName),
 		Password:           password,
@@ -164,7 +180,7 @@ func gcf_create_volume(rootCipherDir string, password []byte, plaintextNames boo
 		Creator:            creator,
 		AESSIV:             false,
 		DeterministicNames: false,
-		XChaCha20Poly1305:  false,
+		XChaCha20Poly1305:  useXChaCha,
 	})
 	if err == nil {
 		if plaintextNames {

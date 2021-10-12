@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"../cryptocore"
-	"../stupidgcm"
 )
 
 const (
@@ -40,8 +39,6 @@ type ContentEnc struct {
 	allZeroBlock []byte
 	// All-zero block of size IVBitLen/8, for fast compares
 	allZeroNonce []byte
-	// Force decode even if integrity check fails (openSSL only)
-	forceDecode bool
 
 	// Ciphertext block "sync.Pool" pool. Always returns cipherBS-sized byte
 	// slices (usually 4128 bytes).
@@ -59,7 +56,7 @@ type ContentEnc struct {
 }
 
 // New returns an initialized ContentEnc instance.
-func New(cc *cryptocore.CryptoCore, plainBS uint64, forceDecode bool) *ContentEnc {
+func New(cc *cryptocore.CryptoCore, plainBS uint64) *ContentEnc {
 	if MAX_KERNEL_WRITE%plainBS != 0 {
 		log.Panicf("unaligned MAX_KERNEL_WRITE=%d", MAX_KERNEL_WRITE)
 	}
@@ -77,7 +74,6 @@ func New(cc *cryptocore.CryptoCore, plainBS uint64, forceDecode bool) *ContentEn
 		cipherBS:     cipherBS,
 		allZeroBlock: make([]byte, cipherBS),
 		allZeroNonce: make([]byte, cc.IVLen),
-		forceDecode:  forceDecode,
 		cBlockPool:   newBPool(int(cipherBS)),
 		CReqPool:     newBPool(cReqSize),
 		pBlockPool:   newBPool(int(plainBS)),
@@ -107,9 +103,7 @@ func (be *ContentEnc) DecryptBlocks(ciphertext []byte, firstBlockNo uint64, file
 		var pBlock []byte
 		pBlock, err = be.DecryptBlock(cBlock, blockNo, fileID)
 		if err != nil {
-			if !(be.forceDecode && err == stupidgcm.ErrAuth) {
-				break
-			}
+			break
 		}
 		pBuf.Write(pBlock)
 		be.pBlockPool.Put(pBlock)
@@ -159,7 +153,7 @@ func (be *ContentEnc) DecryptBlock(ciphertext []byte, blockNo uint64, fileID []b
 	nonce := ciphertext[:be.cryptoCore.IVLen]
 	if bytes.Equal(nonce, be.allZeroNonce) {
 		// Bug in tmpfs?
-		// https://github.com/rfjakob/gocryptfs/v2/issues/56
+		// https://github.com/rfjakob/gocryptfs/issues/56
 		// http://www.spinics.net/lists/kernel/msg2370127.html
 		return nil, errors.New("all-zero nonce")
 	}
@@ -172,9 +166,6 @@ func (be *ContentEnc) DecryptBlock(ciphertext []byte, blockNo uint64, fileID []b
 	plaintext, err := be.cryptoCore.AEADCipher.Open(plaintext, nonce, ciphertext, aData)
 
 	if err != nil {
-		if be.forceDecode && err == stupidgcm.ErrAuth {
-			return plaintext, err
-		}
 		return nil, err
 	}
 
