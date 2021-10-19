@@ -1,11 +1,9 @@
 @ECHO OFF
 ECHO.
-ECHO Before we continue, please download https://www.openssl.org/source/openssl-1.1.1k.tar.gz to libgocryptfs folder
+ECHO Before we continue, please untar OpenSSL source code to libgocryptfs/openssl/
 ECHO.
 PAUSE
-@ECHO OFF
 docker build . -t libgocryptfs
-docker create --name libgocryptfs-instance libgocryptfs
-docker cp libgocryptfs-instance:/work/build .
-docker cp libgocryptfs-instance:/build-results.tar .
 docker container rm libgocryptfs-instance
+docker run --name libgocryptfs-instance --env FORCE_INSTALL_GO_DEPS=1 --env OPENSSL_PATH=./openssl --mount type=bind,src=%~dp0,dst=/work libgocryptfs
+PAUSE

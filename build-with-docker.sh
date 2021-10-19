@@ -1,9 +1,8 @@
-set -xe
-if [ ! -f openssl-1.1.1k.tar.gz ]; then
-    wget https://www.openssl.org/source/openssl-1.1.1k.tar.gz
+set -e
+if [ ! -f openssl.tar ]; then
+    echo "Before we continue, please untar OpenSSL source code to libgocryptfs/openssl/"
+    exit 1
 fi
 docker build . -t libgocryptfs
-docker create --name libgocryptfs-instance libgocryptfs
-docker cp libgocryptfs-instance:/work/build .
-docker cp libgocryptfs-instance:/build-results.tar .
 docker container rm libgocryptfs-instance
+docker run --name libgocryptfs-instance --env FORCE_INSTALL_GO_DEPS=1 --env OPENSSL_PATH=./openssl --mount type=bind,src="$(pwd)",dst=/work libgocryptfs

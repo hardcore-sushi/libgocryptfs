@@ -1,5 +1,8 @@
 #!/bin/bash
 
+if [ ${FORCE_INSTALL_GO_DEPS} -eq 1 ]; then
+  go get golang.org/x/sys/unix golang.org/x/sys/cpu golang.org/x/crypto/hkdf github.com/jacobsa/crypto/siv github.com/rfjakob/eme
+fi
 if [ -z ${ANDROID_NDK_HOME+x} ]; then
   echo "Error: \$ANDROID_NDK_HOME is not defined."
 elif [ -z ${OPENSSL_PATH+x} ]; then
