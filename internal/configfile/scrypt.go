@@ -1,6 +1,7 @@
 package configfile
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"os"
@@ -61,8 +62,9 @@ func NewScryptKDF(logN int) ScryptKDF {
 
 // DeriveKey returns a new key from a supplied password.
 func (s *ScryptKDF) DeriveKey(pw []byte) []byte {
-	s.validateParams()
-
+	if err := s.validateParams(); err != nil {
+		os.Exit(exitcodes.ScryptParams)
+	}
 	k, err := scrypt.Key(pw, s.Salt, s.N, s.R, s.P, s.KeyLen)
 	if err != nil {
 		log.Panicf("DeriveKey failed: %v", err)
@@ -80,21 +82,22 @@ func (s *ScryptKDF) LogN() int {
 // If not, it exists with an error message.
 // This makes sure we do not get weak parameters passed through a
 // rougue gocryptfs.conf.
-func (s *ScryptKDF) validateParams() {
+func (s *ScryptKDF) validateParams() error {
 	minN := 1 << scryptMinLogN
 	if s.N < minN {
-		os.Exit(exitcodes.ScryptParams)
+		return fmt.Errorf("Fatal: scryptn below 10 is too low to make sense")
 	}
 	if s.R < scryptMinR {
-		os.Exit(exitcodes.ScryptParams)
+		return fmt.Errorf("Fatal: scrypt parameter R below minimum: value=%d, min=%d", s.R, scryptMinR)
 	}
 	if s.P < scryptMinP {
-		os.Exit(exitcodes.ScryptParams)
+		return fmt.Errorf("Fatal: scrypt parameter P below minimum: value=%d, min=%d", s.P, scryptMinP)
 	}
 	if len(s.Salt) < scryptMinSaltLen {
-		os.Exit(exitcodes.ScryptParams)
+		return fmt.Errorf("Fatal: scrypt salt length below minimum: value=%d, min=%d", len(s.Salt), scryptMinSaltLen)
 	}
 	if s.KeyLen < cryptocore.KeyLen {
-		os.Exit(exitcodes.ScryptParams)
+		return fmt.Errorf("Fatal: scrypt parameter KeyLen below minimum: value=%d, min=%d", s.KeyLen, cryptocore.KeyLen)
 	}
+	return nil
 }

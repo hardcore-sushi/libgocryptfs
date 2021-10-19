@@ -23,20 +23,22 @@ type NameTransform struct {
 	// on the Raw64 feature flag
 	B64 *base64.Encoding
 	// Patterns to bypass decryption
-	badnamePatterns []string
+	badnamePatterns    []string
+	deterministicNames bool
 }
 
 // New returns a new NameTransform instance.
-func New(e *eme.EMECipher, longNames bool, raw64 bool, badname []string) *NameTransform {
+func New(e *eme.EMECipher, longNames bool, raw64 bool, badname []string, deterministicNames bool) *NameTransform {
 	b64 := base64.URLEncoding
 	if raw64 {
 		b64 = base64.RawURLEncoding
 	}
 	return &NameTransform{
-		emeCipher:       e,
-		longNames:       longNames,
-		B64:             b64,
-		badnamePatterns: badname,
+		emeCipher:          e,
+		longNames:          longNames,
+		B64:                b64,
+		badnamePatterns:    badname,
+		deterministicNames: deterministicNames,
 	}
 }
 

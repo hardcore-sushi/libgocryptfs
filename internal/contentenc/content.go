@@ -10,11 +10,7 @@ import (
 	"sync"
 
 	"../cryptocore"
-	"../stupidgcm"
 )
-
-// NonceMode determines how nonces are created.
-type NonceMode int
 
 const (
 	//value from FUSE doc
@@ -27,15 +23,6 @@ const (
 	// master key in the config file is encrypted with a 96-bit IV for
 	// gocryptfs v1.2 and earlier. v1.3 switched to 128 bit.
 	DefaultIVBits = 128
-
-	_ = iota // skip zero
-	// RandomNonce chooses a random nonce.
-	RandomNonce NonceMode = iota
-	// ReverseDeterministicNonce chooses a deterministic nonce, suitable for
-	// use in reverse mode.
-	ReverseDeterministicNonce NonceMode = iota
-	// ExternalNonce derives a nonce from external sources.
-	ExternalNonce NonceMode = iota
 )
 
 // ContentEnc is used to encipher and decipher file content.
@@ -52,8 +39,6 @@ type ContentEnc struct {
 	allZeroBlock []byte
 	// All-zero block of size IVBitLen/8, for fast compares
 	allZeroNonce []byte
-	// Force decode even if integrity check fails (openSSL only)
-	forceDecode bool
 
 	// Ciphertext block "sync.Pool" pool. Always returns cipherBS-sized byte
 	// slices (usually 4128 bytes).
@@ -71,7 +56,7 @@ type ContentEnc struct {
 }
 
 // New returns an initialized ContentEnc instance.
-func New(cc *cryptocore.CryptoCore, plainBS uint64, forceDecode bool) *ContentEnc {
+func New(cc *cryptocore.CryptoCore, plainBS uint64) *ContentEnc {
 	if MAX_KERNEL_WRITE%plainBS != 0 {
 		log.Panicf("unaligned MAX_KERNEL_WRITE=%d", MAX_KERNEL_WRITE)
 	}
@@ -89,7 +74,6 @@ func New(cc *cryptocore.CryptoCore, plainBS uint64, forceDecode bool) *ContentEn
 		cipherBS:     cipherBS,
 		allZeroBlock: make([]byte, cipherBS),
 		allZeroNonce: make([]byte, cc.IVLen),
-		forceDecode:  forceDecode,
 		cBlockPool:   newBPool(int(cipherBS)),
 		CReqPool:     newBPool(cReqSize),
 		pBlockPool:   newBPool(int(plainBS)),
@@ -119,9 +103,7 @@ func (be *ContentEnc) DecryptBlocks(ciphertext []byte, firstBlockNo uint64, file
 		var pBlock []byte
 		pBlock, err = be.DecryptBlock(cBlock, blockNo, fileID)
 		if err != nil {
-			if !(be.forceDecode && err == stupidgcm.ErrAuth) {
-				break
-			}
+			break
 		}
 		pBuf.Write(pBlock)
 		be.pBlockPool.Put(pBlock)
@@ -184,9 +166,6 @@ func (be *ContentEnc) DecryptBlock(ciphertext []byte, blockNo uint64, fileID []b
 	plaintext, err := be.cryptoCore.AEADCipher.Open(plaintext, nonce, ciphertext, aData)
 
 	if err != nil {
-		if be.forceDecode && err == stupidgcm.ErrAuth {
-			return plaintext, err
-		}
 		return nil, err
 	}
 

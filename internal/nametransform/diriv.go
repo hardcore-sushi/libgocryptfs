@@ -22,7 +22,11 @@ const (
 // ReadDirIVAt reads "gocryptfs.diriv" from the directory that is opened as "dirfd".
 // Using the dirfd makes it immune to concurrent renames of the directory.
 // Retries on EINTR.
-func ReadDirIVAt(dirfd int) (iv []byte, err error) {
+// If deterministicNames is set it returns an all-zero slice.
+func (n *NameTransform) ReadDirIVAt(dirfd int) (iv []byte, err error) {
+	if n.deterministicNames {
+		return make([]byte, DirIVLen), nil
+	}
 	fdRaw, err := syscallcompat.Openat(dirfd, DirIVFilename,
 		syscall.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
