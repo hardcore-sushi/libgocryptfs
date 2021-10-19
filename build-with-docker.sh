@@ -1,5 +1,5 @@
 set -e
-if [ ! -f openssl.tar ]; then
+if [ ! -d openssl ]; then
     echo "Before we continue, please untar OpenSSL source code to libgocryptfs/openssl/"
     exit 1
 fi
