@@ -5,4 +5,4 @@ if [ ! -d openssl ]; then
 fi
 docker build . -t libgocryptfs
 docker container rm libgocryptfs-instance
-docker run --name libgocryptfs-instance --env FORCE_INSTALL_GO_DEPS=1 --env OPENSSL_PATH=./openssl --mount type=bind,src="$(pwd)",dst=/work libgocryptfs
+docker run --name libgocryptfs-instance --env OPENSSL_PATH=./openssl --mount type=bind,src="$(pwd)",dst=/work libgocryptfs
