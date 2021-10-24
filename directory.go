@@ -10,11 +10,11 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"./allocator"
-	"./internal/configfile"
-	"./internal/cryptocore"
-	"./internal/nametransform"
-	"./internal/syscallcompat"
+	"libgocryptfs/v2/allocator"
+	"libgocryptfs/v2/internal/configfile"
+	"libgocryptfs/v2/internal/cryptocore"
+	"libgocryptfs/v2/internal/nametransform"
+	"libgocryptfs/v2/internal/syscallcompat"
 )
 
 func mkdirWithIv(dirfd int, cName string, mode uint32) error {

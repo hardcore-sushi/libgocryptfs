@@ -13,8 +13,8 @@ import (
 
 	"github.com/rfjakob/eme"
 
-	"../siv_aead"
-	"../stupidgcm"
+	"libgocryptfs/v2/internal/siv_aead"
+	"libgocryptfs/v2/internal/stupidgcm"
 )
 
 const (

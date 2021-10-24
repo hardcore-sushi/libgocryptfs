@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"../syscallcompat"
+	"libgocryptfs/v2/internal/syscallcompat"
 )
 
 const (

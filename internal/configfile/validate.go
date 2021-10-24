@@ -3,7 +3,7 @@ package configfile
 import (
 	"fmt"
 
-	"../contentenc"
+	"libgocryptfs/v2/internal/contentenc"
 )
 
 // Validate that the combination of settings makes sense and is supported

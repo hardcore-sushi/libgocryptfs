@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"sync"
 
-	"../cryptocore"
+	"libgocryptfs/v2/internal/cryptocore"
 )
 
 const (

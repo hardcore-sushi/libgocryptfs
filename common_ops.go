@@ -6,8 +6,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"./internal/nametransform"
-	"./internal/syscallcompat"
+	"libgocryptfs/v2/internal/nametransform"
+	"libgocryptfs/v2/internal/syscallcompat"
 )
 
 //export gcf_get_attrs

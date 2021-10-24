@@ -10,12 +10,12 @@ import (
 	"strings"
 	"syscall"
 
-	"./internal/configfile"
-	"./internal/contentenc"
-	"./internal/cryptocore"
-	"./internal/nametransform"
-	"./internal/stupidgcm"
-	"./internal/syscallcompat"
+	"libgocryptfs/v2/internal/configfile"
+	"libgocryptfs/v2/internal/contentenc"
+	"libgocryptfs/v2/internal/cryptocore"
+	"libgocryptfs/v2/internal/nametransform"
+	"libgocryptfs/v2/internal/stupidgcm"
+	"libgocryptfs/v2/internal/syscallcompat"
 )
 
 type Directory struct {

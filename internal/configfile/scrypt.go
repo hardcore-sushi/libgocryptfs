@@ -8,8 +8,8 @@ import (
 
 	"golang.org/x/crypto/scrypt"
 
-	"../cryptocore"
-	"../exitcodes"
+	"libgocryptfs/v2/internal/cryptocore"
+	"libgocryptfs/v2/internal/exitcodes"
 )
 
 const (

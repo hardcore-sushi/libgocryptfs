@@ -5,9 +5,9 @@ import (
 	"strings"
 	"syscall"
 
-	"./internal/configfile"
-	"./internal/nametransform"
-	"./internal/syscallcompat"
+	"libgocryptfs/v2/internal/configfile"
+	"libgocryptfs/v2/internal/nametransform"
+	"libgocryptfs/v2/internal/syscallcompat"
 )
 
 // isFiltered - check if plaintext "path" should be forbidden

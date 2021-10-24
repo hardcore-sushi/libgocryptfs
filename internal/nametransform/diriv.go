@@ -7,8 +7,8 @@ import (
 	"os"
 	"syscall"
 
-	"../cryptocore"
-	"../syscallcompat"
+	"libgocryptfs/v2/internal/cryptocore"
+	"libgocryptfs/v2/internal/syscallcompat"
 )
 
 const (

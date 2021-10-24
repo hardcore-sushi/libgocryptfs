@@ -10,9 +10,9 @@ import (
 
 	"os"
 
-	"../contentenc"
-	"../cryptocore"
-	"../exitcodes"
+	"libgocryptfs/v2/internal/contentenc"
+	"libgocryptfs/v2/internal/cryptocore"
+	"libgocryptfs/v2/internal/exitcodes"
 )
 
 const (

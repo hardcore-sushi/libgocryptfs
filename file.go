@@ -8,9 +8,9 @@ import (
 	"os"
 	"syscall"
 
-	"./internal/contentenc"
-	"./internal/nametransform"
-	"./internal/syscallcompat"
+	"libgocryptfs/v2/internal/contentenc"
+	"libgocryptfs/v2/internal/nametransform"
+	"libgocryptfs/v2/internal/syscallcompat"
 )
 
 // mangleOpenFlags is used by Create() and Open() to convert the open flags the user
