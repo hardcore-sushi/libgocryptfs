@@ -47,12 +47,3 @@ func Getdents(fd int) ([]DirEntry, error) {
 	entries, _, err := getdents(fd)
 	return entries, err
 }
-
-// Renameat2 does not exist on Darwin, so we have to wrap it here.
-// Retries on EINTR.
-func Renameat2(olddirfd int, oldpath string, newdirfd int, newpath string, flags uint) (err error) {
-	err = retryEINTR(func() error {
-		return unix.Renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
-	})
-	return err
-}

@@ -30,6 +30,7 @@ func gcf_get_attrs(sessionID int, relPath string) (uint64, int64, bool) {
 	return size, int64(st.Mtim.Sec), true
 }
 
+// libgocryptfs: using Renameat instead of Renameat2 to support older kernels
 //export gcf_rename
 func gcf_rename(sessionID int, oldPath string, newPath string) bool {
 	volume := OpenedVolumes[sessionID]
@@ -47,7 +48,7 @@ func gcf_rename(sessionID int, oldPath string, newPath string) bool {
 
 	// Easy case.
 	if volume.plainTextNames {
-		return errToBool(syscallcompat.Renameat2(dirfd, cName, dirfd2, cName2, 0))
+		return errToBool(syscallcompat.Renameat(dirfd, cName, dirfd2, cName2))
 	}
 	// Long destination file name: create .name file
 	nameFileAlreadyThere := false
@@ -63,7 +64,7 @@ func gcf_rename(sessionID int, oldPath string, newPath string) bool {
 		}
 	}
 	// Actual rename
-	err = syscallcompat.Renameat2(dirfd, cName, dirfd2, cName2, 0)
+	err = syscallcompat.Renameat(dirfd, cName, dirfd2, cName2)
 	if err == syscall.ENOTEMPTY || err == syscall.EEXIST {
 		// If an empty directory is overwritten we will always get an error as
 		// the "empty" directory will still contain gocryptfs.diriv.
@@ -71,7 +72,7 @@ func gcf_rename(sessionID int, oldPath string, newPath string) bool {
 		// We handle that by trying to fs.Rmdir() the target directory and trying
 		// again.
 		if gcf_rmdir(sessionID, newPath) {
-			err = syscallcompat.Renameat2(dirfd, cName, dirfd2, cName2, 0)
+			err = syscallcompat.Renameat(dirfd, cName, dirfd2, cName2)
 		}
 	}
 	if err != nil {
