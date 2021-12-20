@@ -37,7 +37,7 @@ func mangleOpenFlags(flags uint32) (newFlags int) {
 	return newFlags
 }
 
-func (volume *Volume) registerFileHandle(file File) int {
+func (volume *Volume) registerFileHandle(fd int, cName, path string) int {
 	handleID := -1
 	c := 0
 	for handleID == -1 {
@@ -47,7 +47,7 @@ func (volume *Volume) registerFileHandle(file File) int {
 		}
 		c++
 	}
-	volume.file_handles[handleID] = file
+	volume.file_handles[handleID] = File{os.NewFile(uintptr(fd), cName), string([]byte(path[:]))}//pathCopy.String()}
 	return handleID
 }
 
@@ -381,7 +381,7 @@ func gcf_open_read_mode(sessionID int, path string) int {
 	if err != nil {
 		return -1
 	}
-	return volume.registerFileHandle(File{os.NewFile(uintptr(fd), cName), path})
+	return volume.registerFileHandle(fd, cName, path)
 }
 
 //export gcf_open_write_mode
@@ -414,7 +414,7 @@ func gcf_open_write_mode(sessionID int, path string, mode uint32) int {
 	if err != nil {
 		return -1
 	}
-	return volume.registerFileHandle(File{os.NewFile(uintptr(fd), cName), path})
+	return volume.registerFileHandle(fd, cName, path)
 }
 
 //export gcf_truncate
