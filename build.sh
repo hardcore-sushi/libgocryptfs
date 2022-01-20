@@ -1,12 +1,16 @@
 #!/bin/bash
 
 if [ -z ${ANDROID_NDK_HOME+x} ]; then
-  echo "Error: \$ANDROID_NDK_HOME is not defined."
-elif [ -z ${OPENSSL_PATH+x} ]; then
-   echo "Error: \$OPENSSL_PATH is not defined."
+  echo "Error: \$ANDROID_NDK_HOME is not defined." >&2
+  exit 1
 else
   NDK_BIN_PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
   declare -a ABIs=("x86_64" "x86" "arm64-v8a" "armeabi-v7a")
+
+  invalid_abi() {
+    echo "Invalid ABI: $1" >&2
+    exit 1
+  }
 
   compile_openssl(){
     if [ ! -d "./lib/$1" ]; then
@@ -19,15 +23,26 @@ else
       elif [ "$1" = "armeabi-v7a" ]; then
         OPENSSL_ARCH="android-arm"
       else
-        echo "Invalid ABI: $1"
-        exit
+        invalid_abi $1
+      fi
+      if [ -z ${OPENSSL_PATH+x} ]; then
+        echo "Error: \$OPENSSL_PATH is not defined." >&2
+        exit 1
       fi
 
       export CFLAGS=-D__ANDROID_API__=21
       export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$ANDROID_NDK_HOME/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin:$PATH
-      (cd "$OPENSSL_PATH" && if [ -f "Makefile" ]; then make clean; fi && ./Configure $OPENSSL_ARCH -D__ANDROID_API__=21 && make -j4 build_libs)
-      mkdir -p "./lib/$1" && cp "$OPENSSL_PATH/libcrypto.a" "$OPENSSL_PATH/libssl.a" "./lib/$1"
-      mkdir -p "./include/$1" && cp -r "$OPENSSL_PATH"/include/* "./include/$1/"
+      (
+        cd "$OPENSSL_PATH"
+        if [ -f "Makefile" ]; then
+                make clean
+        fi
+        ./Configure $OPENSSL_ARCH -D__ANDROID_API__=21 &&
+        make -j $(nproc --all) build_libs
+      ) &&
+      mkdir -p "./lib/$1" "./include/$1" &&
+      cp "$OPENSSL_PATH/libcrypto.a" "$OPENSSL_PATH/libssl.a" "./lib/$1" &&
+      cp -r "$OPENSSL_PATH"/include/* "./include/$1/" || exit 1
     fi
   }
 
@@ -47,8 +62,7 @@ else
       export GOARCH=arm
       export GOARM=7
     else
-      echo "Invalid ABI: $1"
-      exit
+      invalid_abi $1
     fi
 
     export CC="$NDK_BIN_PATH/$CFN"
@@ -57,9 +71,10 @@ else
     export GOOS=android
     export CGO_CFLAGS="-I ${PWD}/include/$1"
     export CGO_LDFLAGS="-Wl,-soname=libgocryptfs.so -L${PWD}/lib/$1"
-    go build -o build/$1/libgocryptfs.so -buildmode=c-shared
+    go build -o build/$1/libgocryptfs.so -buildmode=c-shared || exit 1
   }
 
+  cd $(dirname $0) || exit 1
   if [ "$#" -eq 1 ]; then
     compile_for_arch $1
   else
@@ -68,5 +83,4 @@ else
       compile_for_arch $abi
     done
   fi
-  echo "Done."
 fi

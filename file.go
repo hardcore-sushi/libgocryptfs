@@ -47,7 +47,7 @@ func (volume *Volume) registerFileHandle(fd int, cName, path string) int {
 		}
 		c++
 	}
-	volume.file_handles[handleID] = File{os.NewFile(uintptr(fd), cName), string([]byte(path[:]))}//pathCopy.String()}
+	volume.file_handles[handleID] = File{os.NewFile(uintptr(fd), cName), string([]byte(path[:]))}
 	return handleID
 }
 
