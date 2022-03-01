@@ -73,7 +73,7 @@ type CreateArgs struct {
 // Create - create a new config with a random key encrypted with
 // "Password" and write it to "Filename".
 // Uses scrypt with cost parameter "LogN".
-func Create(args *CreateArgs) error {
+func Create(args *CreateArgs, returnedScryptHashBuff []byte) error {
 	cf := ConfFile{
 		filename: args.Filename,
 		Creator:  args.Creator,
@@ -117,9 +117,13 @@ func Create(args *CreateArgs) error {
 		// Encrypt it using the password
 		// This sets ScryptObject and EncryptedKey
 		// Note: this looks at the FeatureFlags, so call it AFTER setting them.
-		cf.EncryptKey(key, args.Password, args.LogN, false)
+		scryptHash := cf.EncryptKey(key, args.Password, args.LogN, len(returnedScryptHashBuff) > 0)
 		for i := range key {
 			key[i] = 0
+		}
+		for i := range scryptHash {
+			returnedScryptHashBuff[i] = scryptHash[i]
+			scryptHash[i] = 0
 		}
 		// key runs out of scope here
 	}

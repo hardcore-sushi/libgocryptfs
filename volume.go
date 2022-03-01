@@ -162,7 +162,7 @@ func gcf_change_password(rootCipherDir string, oldPassword, givenScryptHash, new
 }
 
 //export gcf_create_volume
-func gcf_create_volume(rootCipherDir string, password []byte, plaintextNames bool, xchacha int8, logN int, creator string) bool {
+func gcf_create_volume(rootCipherDir string, password []byte, plaintextNames bool, xchacha int8, logN int, creator string, returnedScryptHashBuff []byte) bool {
 	var useXChaCha bool
 	switch xchacha {
 	case 1:
@@ -181,7 +181,7 @@ func gcf_create_volume(rootCipherDir string, password []byte, plaintextNames boo
 		AESSIV:             false,
 		DeterministicNames: false,
 		XChaCha20Poly1305:  useXChaCha,
-	})
+	}, returnedScryptHashBuff)
 	if err == nil {
 		if plaintextNames {
 			return true
