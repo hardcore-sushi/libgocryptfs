@@ -2,13 +2,19 @@ package main
 
 import (
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"libgocryptfs/v2/internal/configfile"
-	"libgocryptfs/v2/internal/nametransform"
 	"libgocryptfs/v2/internal/syscallcompat"
 )
+
+func getParentPath(path string) string {
+	parent := filepath.Dir(path)
+	if parent == "." {
+		return ""
+	}
+	return parent
+}
 
 // isFiltered - check if plaintext "path" should be forbidden
 //
@@ -26,105 +32,97 @@ func (volume *Volume) isFiltered(path string) bool {
 	return false
 }
 
-func (volume *Volume) openBackingDir(relPath string) (dirfd int, cName string, err error) {
-	dirRelPath := nametransform.Dir(relPath)
-	// With PlaintextNames, we don't need to read DirIVs. Easy.
-	if volume.plainTextNames {
-		dirfd, err = syscallcompat.OpenDirNofollow(volume.rootCipherDir, dirRelPath)
-		if err != nil {
-			return -1, "", err
-		}
-		// If relPath is empty, cName is ".".
-		cName = filepath.Base(relPath)
-		return dirfd, cName, nil
-	}
-	// Open cipherdir (following symlinks)
-	dirfd, err = syscallcompat.Open(volume.rootCipherDir, syscall.O_DIRECTORY|syscallcompat.O_PATH, 0)
-	if err != nil {
-		return -1, "", err
-	}
-	// If relPath is empty, cName is ".".
-	if relPath == "" {
-		return dirfd, ".", nil
-	}
-	// Walk the directory tree
-	parts := strings.Split(relPath, "/")
-	for i, name := range parts {
-		iv, err := volume.nameTransform.ReadDirIVAt(dirfd)
-		if err != nil {
-			syscall.Close(dirfd)
-			return -1, "", err
-		}
-		cName, err = volume.nameTransform.EncryptAndHashName(name, iv)
-		if err != nil {
-			syscall.Close(dirfd)
-			return -1, "", err
-		}
-		// Last part? We are done.
-		if i == len(parts)-1 {
-			break
-		}
-		// Not the last part? Descend into next directory.
-		dirfd2, err := syscallcompat.Openat(dirfd, cName, syscall.O_NOFOLLOW|syscall.O_DIRECTORY|syscallcompat.O_PATH, 0)
-		syscall.Close(dirfd)
-		if err != nil {
-			return -1, "", err
-		}
-		dirfd = dirfd2
-	}
-	return dirfd, cName, nil
-}
-
 func (volume *Volume) prepareAtSyscall(path string) (dirfd int, cName string, err error) {
-	// root node itself is special
 	if path == "" {
-		return volume.openBackingDir(path)
+		return volume.prepareAtSyscallMyself(path)
 	}
+
+	if volume.isFiltered(path) {
+		return -1, "", nil
+	}
+
+	var encryptName func(int, string, []byte) (string, error)
+	if !volume.plainTextNames {
+		encryptName = func(dirfd int, child string, iv []byte) (cName string, err error) {
+			// Badname allowed, try to determine filenames
+			if volume.nameTransform.HaveBadnamePatterns() {
+				return volume.nameTransform.EncryptAndHashBadName(child, iv, dirfd)
+			}
+			return volume.nameTransform.EncryptAndHashName(child, iv)
+		}
+	}
+
+	child := filepath.Base(path)
+	parentPath := getParentPath(path)
 
 	// Cache lookup
-	// TODO make it work for plaintextnames as well?
-	if !volume.plainTextNames {
-		directory, ok := volume.dirCache[path]
-		if ok {
-			if directory.fd > 0 {
-				cName, err := volume.nameTransform.EncryptAndHashName(filepath.Base(path), directory.iv)
-				if err != nil {
-					return -1, "", err
-				}
-				dirfd, err = syscall.Dup(directory.fd)
-				if err != nil {
-					return -1, "", err
-				}
-				return dirfd, cName, nil
-			}
+	var iv []byte
+	dirfd, iv = volume.dirCache.Lookup(parentPath)
+	if dirfd > 0 {
+		if volume.plainTextNames {
+			return dirfd, child, nil
 		}
+		var err error
+		cName, err = encryptName(dirfd, child, iv)
+		if err != nil {
+			syscall.Close(dirfd)
+			return -1, "", err
+		}
+		return dirfd, cName, nil
 	}
 
-	// Slowpath
-	if volume.isFiltered(path) {
-		return -1, "", syscall.EPERM
+	// Slowpath: Open ourselves & read diriv
+	parentDirfd, myCName, err := volume.prepareAtSyscallMyself(parentPath)
+	if err != nil {
+		return
 	}
-	dirfd, cName, err = volume.openBackingDir(path)
+	defer syscall.Close(parentDirfd)
+
+	dirfd, err = syscallcompat.Openat(parentDirfd, myCName, syscall.O_NOFOLLOW|syscall.O_DIRECTORY|syscallcompat.O_PATH, 0)
 	if err != nil {
 		return -1, "", err
 	}
 
 	// Cache store
 	if !volume.plainTextNames {
-		// TODO: openBackingDir already calls ReadDirIVAt(). Avoid duplicate work?
-		iv, err := volume.nameTransform.ReadDirIVAt(dirfd)
+		var err error
+		iv, err = volume.nameTransform.ReadDirIVAt(dirfd)
 		if err != nil {
 			syscall.Close(dirfd)
 			return -1, "", err
 		}
-		dirfdDup, err := syscall.Dup(dirfd)
-		if err == nil {
-			var pathCopy strings.Builder
-			pathCopy.WriteString(path)
-			volume.dirCache[pathCopy.String()] = Directory{dirfdDup, iv}
-		}
 	}
+	volume.dirCache.Store(parentPath, dirfd, iv)
+
+	if volume.plainTextNames {
+		return dirfd, child, nil
+	}
+
+	cName, err = encryptName(dirfd, child, iv)
+	if err != nil {
+		syscall.Close(dirfd)
+		return -1, "", err
+	}
+
 	return
+}
+
+func (volume *Volume) prepareAtSyscallMyself(path string) (dirfd int, cName string, err error) {
+	dirfd = -1
+
+	// Handle root node
+	if path == "" {
+		var err error
+		// Open cipherdir (following symlinks)
+		dirfd, err = syscallcompat.Open(volume.rootCipherDir, syscall.O_DIRECTORY|syscallcompat.O_PATH, 0)
+		if err != nil {
+			return -1, "", err
+		}
+		return dirfd, ".", nil
+	}
+
+	// Otherwise convert to prepareAtSyscall of parent node
+	return volume.prepareAtSyscall(path)
 }
 
 // decryptSymlinkTarget: "cData64" is base64-decoded and decrypted

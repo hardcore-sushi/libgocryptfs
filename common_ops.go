@@ -3,7 +3,6 @@ package main
 import (
 	"C"
 	"syscall"
-
 	"golang.org/x/sys/unix"
 
 	"libgocryptfs/v2/internal/nametransform"

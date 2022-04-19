@@ -7,7 +7,6 @@ import (
 	"C"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"libgocryptfs/v2/internal/configfile"
@@ -17,11 +16,6 @@ import (
 	"libgocryptfs/v2/internal/stupidgcm"
 	"libgocryptfs/v2/internal/syscallcompat"
 )
-
-type Directory struct {
-	fd int
-	iv []byte
-}
 
 type File struct {
 	fd   *os.File
@@ -35,24 +29,18 @@ type Volume struct {
 	nameTransform  *nametransform.NameTransform
 	cryptoCore     *cryptocore.CryptoCore
 	contentEnc     *contentenc.ContentEnc
-	dirCache       map[string]Directory
+	dirCache       dirCache
 	file_handles   map[int]File
 	fileIDs        map[int][]byte
 }
 
-var OpenedVolumes map[int]Volume
+var OpenedVolumes map[int]*Volume
 
 func wipe(d []byte) {
 	for i := range d {
 		d[i] = 0
 	}
 	d = nil
-}
-
-func clearDirCache(volumeID int) {
-	for k := range OpenedVolumes[volumeID].dirCache {
-		delete(OpenedVolumes[volumeID].dirCache, k)
-	}
 }
 
 func errToBool(err error) bool {
@@ -85,12 +73,14 @@ func registerNewVolume(rootCipherDir string, masterkey []byte, cf *configfile.Co
 	)
 
 	//copying rootCipherDir
-	var grcd strings.Builder
-	grcd.WriteString(rootCipherDir)
-	newVolume.rootCipherDir = grcd.String()
+	newVolume.rootCipherDir = string([]byte(rootCipherDir[:]))
 
+	ivLen := nametransform.DirIVLen
+	if newVolume.plainTextNames {
+		ivLen = 0
+	}
 	// New empty caches
-	newVolume.dirCache = make(map[string]Directory)
+	newVolume.dirCache = dirCache{ivLen: ivLen}
 	newVolume.file_handles = make(map[int]File)
 	newVolume.fileIDs = make(map[int][]byte)
 
@@ -105,9 +95,9 @@ func registerNewVolume(rootCipherDir string, masterkey []byte, cf *configfile.Co
 		c++
 	}
 	if OpenedVolumes == nil {
-		OpenedVolumes = make(map[int]Volume)
+		OpenedVolumes = make(map[int]*Volume)
 	}
-	OpenedVolumes[volumeID] = newVolume
+	OpenedVolumes[volumeID] = &newVolume
 	return volumeID
 }
 
@@ -127,11 +117,12 @@ func gcf_init(rootCipherDir string, password, givenScryptHash, returnedScryptHas
 
 //export gcf_close
 func gcf_close(volumeID int) {
-	OpenedVolumes[volumeID].cryptoCore.Wipe()
-	for handleID := range OpenedVolumes[volumeID].file_handles {
+	volume := OpenedVolumes[volumeID]
+	volume.cryptoCore.Wipe()
+	for handleID := range volume.file_handles {
 		gcf_close_file(volumeID, handleID)
 	}
-	clearDirCache(volumeID)
+	volume.dirCache.Clear()
 	delete(OpenedVolumes, volumeID)
 }
 

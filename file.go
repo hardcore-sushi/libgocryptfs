@@ -370,7 +370,7 @@ func (volume *Volume) truncate(handleID int, newSize uint64) bool {
 //export gcf_open_read_mode
 func gcf_open_read_mode(sessionID int, path string) int {
 	volume := OpenedVolumes[sessionID]
-	dirfd, cName, err := volume.prepareAtSyscall(path)
+	dirfd, cName, err := volume.prepareAtSyscallMyself(path)
 	if err != nil {
 		return -1
 	}
@@ -455,13 +455,14 @@ func gcf_write_file(sessionID, handleID int, offset uint64, data []byte) uint32 
 
 //export gcf_close_file
 func gcf_close_file(sessionID, handleID int) {
-	f, ok := OpenedVolumes[sessionID].file_handles[handleID]
+	volume := OpenedVolumes[sessionID]
+	f, ok := volume.file_handles[handleID]
 	if ok {
 		f.fd.Close()
-		delete(OpenedVolumes[sessionID].file_handles, handleID)
-		_, ok := OpenedVolumes[sessionID].fileIDs[handleID]
+		delete(volume.file_handles, handleID)
+		_, ok := volume.fileIDs[handleID]
 		if ok {
-			delete(OpenedVolumes[sessionID].fileIDs, handleID)
+			delete(volume.fileIDs, handleID)
 		}
 	}
 }

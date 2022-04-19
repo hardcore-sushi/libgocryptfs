@@ -41,7 +41,7 @@ func mkdirWithIv(dirfd int, cName string, mode uint32) error {
 //export gcf_list_dir
 func gcf_list_dir(sessionID int, dirName string) (*C.char, *C.int, C.int) {
 	volume := OpenedVolumes[sessionID]
-	parentDirFd, cDirName, err := volume.prepareAtSyscall(dirName)
+	parentDirFd, cDirName, err := volume.prepareAtSyscallMyself(dirName)
 	if err != nil {
 		return nil, nil, 0
 	}
@@ -58,7 +58,7 @@ func gcf_list_dir(sessionID int, dirName string) (*C.char, *C.int, C.int) {
 	}
 	// Get DirIV (stays nil if PlaintextNames is used)
 	var cachedIV []byte
-	if !OpenedVolumes[sessionID].plainTextNames {
+	if !volume.plainTextNames {
 		// Read the DirIV from disk
 		cachedIV, err = volume.nameTransform.ReadDirIVAt(fd)
 		if err != nil {
@@ -75,7 +75,7 @@ func gcf_list_dir(sessionID int, dirName string) (*C.char, *C.int, C.int) {
 			// silently ignore "gocryptfs.conf" in the top level dir
 			continue
 		}
-		if OpenedVolumes[sessionID].plainTextNames {
+		if volume.plainTextNames {
 			plain.WriteString(cipherEntries[i].Name + "\x00")
 			modes = append(modes, cipherEntries[i].Mode)
 			continue
@@ -96,7 +96,7 @@ func gcf_list_dir(sessionID int, dirName string) (*C.char, *C.int, C.int) {
 			// ignore "gocryptfs.longname.*.name"
 			continue
 		}
-		name, err := OpenedVolumes[sessionID].nameTransform.DecryptName(cName, cachedIV)
+		name, err := volume.nameTransform.DecryptName(cName, cachedIV)
 		if err != nil {
 			continue
 		}
@@ -143,7 +143,7 @@ func gcf_mkdir(sessionID int, path string, mode uint32) bool {
 		// Handle long file name
 		if nametransform.IsLongContent(cName) {
 			// Create ".name"
-			err = OpenedVolumes[sessionID].nameTransform.WriteLongNameAt(dirfd, cName, path)
+			err = volume.nameTransform.WriteLongNameAt(dirfd, cName, path)
 			if err != nil {
 				return false
 			}
@@ -188,7 +188,7 @@ func gcf_mkdir(sessionID int, path string, mode uint32) bool {
 //export gcf_rmdir
 func gcf_rmdir(sessionID int, relPath string) bool {
 	volume := OpenedVolumes[sessionID]
-	parentDirFd, cName, err := volume.openBackingDir(relPath)
+	parentDirFd, cName, err := volume.prepareAtSyscall(relPath)
 	if err != nil {
 		return false
 	}
