@@ -117,7 +117,10 @@ func gcf_init(rootCipherDir string, password, givenScryptHash, returnedScryptHas
 
 //export gcf_close
 func gcf_close(volumeID int) {
-	volume := OpenedVolumes[volumeID]
+	volume, ok := OpenedVolumes[volumeID]
+	if !ok {
+		return
+	}
 	volume.cryptoCore.Wipe()
 	for handleID := range volume.file_handles {
 		gcf_close_file(volumeID, handleID)

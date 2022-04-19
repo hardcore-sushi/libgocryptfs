@@ -369,7 +369,10 @@ func (volume *Volume) truncate(handleID int, newSize uint64) bool {
 
 //export gcf_open_read_mode
 func gcf_open_read_mode(sessionID int, path string) int {
-	volume := OpenedVolumes[sessionID]
+	volume, ok := OpenedVolumes[sessionID]
+	if !ok {
+		return -1
+	}
 	dirfd, cName, err := volume.prepareAtSyscallMyself(path)
 	if err != nil {
 		return -1
@@ -386,7 +389,10 @@ func gcf_open_read_mode(sessionID int, path string) int {
 
 //export gcf_open_write_mode
 func gcf_open_write_mode(sessionID int, path string, mode uint32) int {
-	volume := OpenedVolumes[sessionID]
+	volume, ok := OpenedVolumes[sessionID]
+	if !ok {
+		return -1
+	}
 	dirfd, cName, err := volume.prepareAtSyscall(path)
 	if err != nil {
 		return -1
@@ -419,7 +425,10 @@ func gcf_open_write_mode(sessionID int, path string, mode uint32) int {
 
 //export gcf_truncate
 func gcf_truncate(sessionID int, handleID int, offset uint64) bool {
-	volume := OpenedVolumes[sessionID]
+	volume, ok := OpenedVolumes[sessionID]
+	if !ok {
+		return false
+	}
 	return volume.truncate(handleID, offset)
 }
 
@@ -431,7 +440,10 @@ func gcf_read_file(sessionID, handleID int, offset uint64, dst_buff []byte) uint
 		return 0
 	}
 
-	volume := OpenedVolumes[sessionID]
+	volume, ok := OpenedVolumes[sessionID]
+	if !ok {
+		return 0
+	}
 	out, success := volume.doRead(handleID, dst_buff[:0], offset, uint64(length))
 	if !success {
 		return 0
@@ -448,14 +460,20 @@ func gcf_write_file(sessionID, handleID int, offset uint64, data []byte) uint32 
 		return 0
 	}
 
-	volume := OpenedVolumes[sessionID]
+	volume, ok := OpenedVolumes[sessionID]
+	if !ok {
+		return 0
+	}
 	n, _ := volume.doWrite(handleID, data, offset)
 	return n
 }
 
 //export gcf_close_file
 func gcf_close_file(sessionID, handleID int) {
-	volume := OpenedVolumes[sessionID]
+	volume, ok := OpenedVolumes[sessionID]
+	if !ok {
+		return
+	}
 	f, ok := volume.file_handles[handleID]
 	if ok {
 		f.fd.Close()
@@ -469,7 +487,10 @@ func gcf_close_file(sessionID, handleID int) {
 
 //export gcf_remove_file
 func gcf_remove_file(sessionID int, path string) bool {
-	volume := OpenedVolumes[sessionID]
+	volume, ok := OpenedVolumes[sessionID]
+	if !ok {
+		return false
+	}
 	dirfd, cName, err := volume.prepareAtSyscall(path)
 	if err != nil {
 		return false

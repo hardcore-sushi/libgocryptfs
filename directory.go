@@ -40,7 +40,10 @@ func mkdirWithIv(dirfd int, cName string, mode uint32) error {
 
 //export gcf_list_dir
 func gcf_list_dir(sessionID int, dirName string) (*C.char, *C.int, C.int) {
-	volume := OpenedVolumes[sessionID]
+	volume, ok := OpenedVolumes[sessionID]
+	if !ok {
+		return nil, nil, 0
+	}
 	parentDirFd, cDirName, err := volume.prepareAtSyscallMyself(dirName)
 	if err != nil {
 		return nil, nil, 0
@@ -116,7 +119,10 @@ func gcf_list_dir(sessionID int, dirName string) (*C.char, *C.int, C.int) {
 
 //export gcf_mkdir
 func gcf_mkdir(sessionID int, path string, mode uint32) bool {
-	volume := OpenedVolumes[sessionID]
+	volume, ok := OpenedVolumes[sessionID]
+	if !ok {
+		return false
+	}
 	dirfd, cName, err := volume.prepareAtSyscall(path)
 	if err != nil {
 		return false
@@ -187,7 +193,10 @@ func gcf_mkdir(sessionID int, path string, mode uint32) bool {
 
 //export gcf_rmdir
 func gcf_rmdir(sessionID int, relPath string) bool {
-	volume := OpenedVolumes[sessionID]
+	volume, ok := OpenedVolumes[sessionID]
+	if !ok {
+		return false
+	}
 	parentDirFd, cName, err := volume.prepareAtSyscall(relPath)
 	if err != nil {
 		return false
