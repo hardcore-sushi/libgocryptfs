@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -40,6 +41,7 @@ func (e *dirCacheEntry) Clear() {
 }
 
 type dirCache struct {
+	sync.Mutex
 	// Expected length of the stored IVs. Only used for sanity checks.
 	// Usually set to 16, but 0 in plaintextnames mode.
 	ivLen int
@@ -57,6 +59,8 @@ type dirCache struct {
 
 // Clear clears the cache contents.
 func (d *dirCache) Clear() {
+	d.Lock()
+	defer d.Unlock()
 	for i := range d.entries {
 		d.entries[i].Clear()
 	}
@@ -70,6 +74,8 @@ func (d *dirCache) Store(path string, fd int, iv []byte) {
 	if fd <= 0 || len(iv) != d.ivLen {
 		log.Panicf("Store sanity check failed: fd=%d len=%d", fd, len(iv))
 	}
+	d.Lock()
+	defer d.Unlock()
 	e := &d.entries[d.nextIndex]
 	// Round-robin works well enough
 	d.nextIndex = (d.nextIndex + 1) % dirCacheSize
@@ -93,6 +99,8 @@ func (d *dirCache) Store(path string, fd int, iv []byte) {
 // It returns (-1, nil) if not found. The fd is internally Dup()ed and the
 // caller must close it when done.
 func (d *dirCache) Lookup(path string) (fd int, iv []byte) {
+	d.Lock()
+	defer d.Unlock()
 	if enableStats {
 		d.lookups++
 	}
@@ -132,5 +140,15 @@ func (d *dirCache) expireThread() {
 	for {
 		time.Sleep(60 * time.Second)
 		d.Clear()
+	}
+}
+
+func (d* dirCache) Delete(path string) {
+	for i := range d.entries {
+		e := &d.entries[i]
+		if e.path == path {
+			e.Clear()
+			break
+		}
 	}
 }

@@ -3,4 +3,4 @@ libgocryptfs is a re-desing of the original [gocryptfs](https://github.com/rfjak
 - Reduce attack surface by restricting volumes access to only one process rather than one user
 
 ## Warning !
-The only goal of this library is to be integrated in [DroidFS](https://forge.chapril.org/hardcoresushi/DroidFS). It's not actually ready for other usages. libgocryptfs doesn't implement all features provided by gocryptfs like symbolic links creation, thread-safety, reverse volume creation... Use it at your own risk !
+The only goal of this library is to be integrated in [DroidFS](https://forge.chapril.org/hardcoresushi/DroidFS). It's not actually ready for other usages. libgocryptfs doesn't implement all features provided by gocryptfs like symbolic links, editing attributes, creating reverse volume... Use it at your own risk !

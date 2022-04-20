@@ -17,10 +17,12 @@ import (
 	"libgocryptfs/v2/internal/syscallcompat"
 )
 
-func mkdirWithIv(dirfd int, cName string, mode uint32) error {
+func (volume *Volume) mkdirWithIv(dirfd int, cName string, mode uint32) error {
 	// Between the creation of the directory and the creation of gocryptfs.diriv
 	// the directory is inconsistent. Take the lock to prevent other readers
 	// from seeing it.
+	volume.dirIVLock.Lock()
+	defer volume.dirIVLock.Unlock()
 	err := unix.Mkdirat(dirfd, cName, mode)
 	if err != nil {
 		return err
@@ -40,10 +42,11 @@ func mkdirWithIv(dirfd int, cName string, mode uint32) error {
 
 //export gcf_list_dir
 func gcf_list_dir(sessionID int, dirName string) (*C.char, *C.int, C.int) {
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return nil, nil, 0
 	}
+	volume := value.(*Volume)
 	parentDirFd, cDirName, err := volume.prepareAtSyscallMyself(dirName)
 	if err != nil {
 		return nil, nil, 0
@@ -119,10 +122,11 @@ func gcf_list_dir(sessionID int, dirName string) (*C.char, *C.int, C.int) {
 
 //export gcf_mkdir
 func gcf_mkdir(sessionID int, path string, mode uint32) bool {
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return false
 	}
+	volume := value.(*Volume)
 	dirfd, cName, err := volume.prepareAtSyscall(path)
 	if err != nil {
 		return false
@@ -155,13 +159,13 @@ func gcf_mkdir(sessionID int, path string, mode uint32) bool {
 			}
 
 			// Create directory
-			err = mkdirWithIv(dirfd, cName, mode)
+			err = volume.mkdirWithIv(dirfd, cName, mode)
 			if err != nil {
 				nametransform.DeleteLongNameAt(dirfd, cName)
 				return false
 			}
 		} else {
-			err = mkdirWithIv(dirfd, cName, mode)
+			err = volume.mkdirWithIv(dirfd, cName, mode)
 			if err != nil {
 				return false
 			}
@@ -193,10 +197,11 @@ func gcf_mkdir(sessionID int, path string, mode uint32) bool {
 
 //export gcf_rmdir
 func gcf_rmdir(sessionID int, relPath string) bool {
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return false
 	}
+	volume := value.(*Volume)
 	parentDirFd, cName, err := volume.prepareAtSyscall(relPath)
 	if err != nil {
 		return false
@@ -229,6 +234,10 @@ func gcf_rmdir(sessionID int, relPath string) bool {
 	}
 	// Move "gocryptfs.diriv" to the parent dir as "gocryptfs.diriv.rmdir.XYZ"
 	tmpName := fmt.Sprintf("%s.rmdir.%d", nametransform.DirIVFilename, cryptocore.RandUint64())
+	// The directory is in an inconsistent state between rename and rmdir.
+	// Protect against concurrent readers.
+	volume.dirIVLock.Lock()
+	defer volume.dirIVLock.Unlock()
 	err = syscallcompat.Renameat(dirfd, nametransform.DirIVFilename, parentDirFd, tmpName)
 	if err != nil {
 		return false
@@ -247,5 +256,6 @@ func gcf_rmdir(sessionID int, relPath string) bool {
 	if nametransform.IsLongContent(cName) {
 		nametransform.DeleteLongNameAt(parentDirFd, cName)
 	}
+	volume.dirCache.Delete(relPath)
 	return true
 }

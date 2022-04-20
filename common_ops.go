@@ -11,10 +11,11 @@ import (
 
 //export gcf_get_attrs
 func gcf_get_attrs(sessionID int, relPath string) (uint64, int64, bool) {
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return 0, 0, false
 	}
+	volume := value.(*Volume)
 	dirfd, cName, err := volume.prepareAtSyscall(relPath)
 	if err != nil {
 		return 0, 0, false
@@ -35,10 +36,11 @@ func gcf_get_attrs(sessionID int, relPath string) (uint64, int64, bool) {
 // libgocryptfs: using Renameat instead of Renameat2 to support older kernels
 //export gcf_rename
 func gcf_rename(sessionID int, oldPath string, newPath string) bool {
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return false
 	}
+	volume := value.(*Volume)
 	dirfd, cName, err := volume.prepareAtSyscall(oldPath)
 	if err != nil {
 		return false

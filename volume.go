@@ -6,8 +6,9 @@ package main
 import (
 	"C"
 	"os"
-	"path/filepath"
+	"sync"
 	"syscall"
+	"path/filepath"
 
 	"libgocryptfs/v2/internal/configfile"
 	"libgocryptfs/v2/internal/contentenc"
@@ -18,23 +19,35 @@ import (
 )
 
 type File struct {
-	fd   *os.File
-	path string
+	fd          *os.File
+	path        string
+	ID          []byte
+	// fdLock prevents the fd to be closed while we are in the middle of
+	// an operation.
+	// Every FUSE entrypoint should RLock(). The only user of Lock() is
+	// Release(), which closes the fd and sets "released" to true.
+	fdLock      sync.RWMutex
+	// ContentLock protects on-disk content from concurrent writes. Every writer
+	// must take this lock before modifying the file content.
+	contentLock sync.RWMutex
 }
 
 type Volume struct {
 	volumeID       int
 	rootCipherDir  string
 	plainTextNames bool
+	// dirIVLock: Lock()ed if any "gocryptfs.diriv" file is modified
+	// Readers must RLock() it to prevent them from seeing intermediate
+	// states
+	dirIVLock      sync.RWMutex
 	nameTransform  *nametransform.NameTransform
 	cryptoCore     *cryptocore.CryptoCore
 	contentEnc     *contentenc.ContentEnc
 	dirCache       dirCache
-	file_handles   map[int]File
-	fileIDs        map[int][]byte
+	file_handles   sync.Map
 }
 
-var OpenedVolumes map[int]*Volume
+var OpenedVolumes sync.Map
 
 func wipe(d []byte) {
 	for i := range d {
@@ -79,25 +92,19 @@ func registerNewVolume(rootCipherDir string, masterkey []byte, cf *configfile.Co
 	if newVolume.plainTextNames {
 		ivLen = 0
 	}
-	// New empty caches
 	newVolume.dirCache = dirCache{ivLen: ivLen}
-	newVolume.file_handles = make(map[int]File)
-	newVolume.fileIDs = make(map[int][]byte)
 
 	//find unused volumeID
 	volumeID := -1
 	c := 0
 	for volumeID == -1 {
-		_, ok := OpenedVolumes[c]
+		_, ok := OpenedVolumes.Load(c)
 		if !ok {
 			volumeID = c
 		}
 		c++
 	}
-	if OpenedVolumes == nil {
-		OpenedVolumes = make(map[int]*Volume)
-	}
-	OpenedVolumes[volumeID] = &newVolume
+	OpenedVolumes.Store(volumeID, &newVolume)
 	return volumeID
 }
 
@@ -117,21 +124,23 @@ func gcf_init(rootCipherDir string, password, givenScryptHash, returnedScryptHas
 
 //export gcf_close
 func gcf_close(volumeID int) {
-	volume, ok := OpenedVolumes[volumeID]
+	value, ok := OpenedVolumes.Load(volumeID)
 	if !ok {
 		return
 	}
+	volume := value.(*Volume)
 	volume.cryptoCore.Wipe()
-	for handleID := range volume.file_handles {
-		gcf_close_file(volumeID, handleID)
-	}
+	volume.file_handles.Range(func (handleID, _ interface {}) bool {
+		gcf_close_file(volumeID, handleID.(int))
+		return true
+	})
 	volume.dirCache.Clear()
-	delete(OpenedVolumes, volumeID)
+	OpenedVolumes.Delete(volumeID)
 }
 
 //export gcf_is_closed
 func gcf_is_closed(volumeID int) bool {
-	_, ok := OpenedVolumes[volumeID]
+	_, ok := OpenedVolumes.Load(volumeID)
 	return !ok
 }
 

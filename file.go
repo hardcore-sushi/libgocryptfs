@@ -41,13 +41,16 @@ func (volume *Volume) registerFileHandle(fd int, cName, path string) int {
 	handleID := -1
 	c := 0
 	for handleID == -1 {
-		_, ok := volume.file_handles[c]
+		_, ok := volume.file_handles.Load(c)
 		if !ok {
 			handleID = c
 		}
 		c++
 	}
-	volume.file_handles[handleID] = File{os.NewFile(uintptr(fd), cName), string([]byte(path[:]))}
+	volume.file_handles.Store(handleID, &File {
+		fd: os.NewFile(uintptr(fd), cName),
+		path: string([]byte(path[:])),
+	})
 	return handleID
 }
 
@@ -100,16 +103,17 @@ func createHeader(fd *os.File) (fileID []byte, err error) {
 // Called by Read() for normal reading,
 // by Write() and Truncate() via doWrite() for Read-Modify-Write.
 func (volume *Volume) doRead(handleID int, dst []byte, off uint64, length uint64) ([]byte, bool) {
-	f, ok := volume.file_handles[handleID]
+	value, ok := volume.file_handles.Load(handleID)
 	if !ok {
 		return nil, false
 	}
+	f := value.(*File)
 	fd := f.fd
 	// Get the file ID, either from the open file table, or from disk.
 	var fileID []byte
-	if volume.fileIDs[handleID] != nil {
+	if f.ID != nil {
 		// Use the cached value in the file table
-		fileID = volume.fileIDs[handleID]
+		fileID = f.ID
 	} else {
 		// Not cached, we have to read it from disk.
 		var err error
@@ -118,9 +122,8 @@ func (volume *Volume) doRead(handleID int, dst []byte, off uint64, length uint64
 			return nil, false
 		}
 		// Save into the file table
-		volume.fileIDs[handleID] = fileID
+		f.ID = fileID
 	}
-
 	// Read the backing ciphertext in one go
 	blocks := volume.contentEnc.ExplodePlainRange(off, length)
 	alignedOffset, alignedLength := blocks[0].JointCiphertextRange(blocks)
@@ -180,19 +183,16 @@ func (volume *Volume) doRead(handleID int, dst []byte, off uint64, length uint64
 //
 // Empty writes do nothing and are allowed.
 func (volume *Volume) doWrite(handleID int, data []byte, off uint64) (uint32, bool) {
-	fileWasEmpty := false
-	// Get the file ID, create a new one if it does not exist yet.
-	var fileID []byte
-
-	f, ok := volume.file_handles[handleID]
+	value, ok := volume.file_handles.Load(handleID)
 	if !ok {
 		return 0, false
 	}
+	f := value.(*File)
 	fd := f.fd
-	// The caller has exclusively locked ContentLock, which blocks all other
-	// readers and writers. No need to take IDLock.
-	if volume.fileIDs[handleID] != nil {
-		fileID = volume.fileIDs[handleID]
+	fileWasEmpty := false
+	var fileID []byte
+	if f.ID != nil {
+		fileID = f.ID
 	} else {
 		// If the file ID is not cached, read it from disk
 		var err error
@@ -205,7 +205,7 @@ func (volume *Volume) doWrite(handleID int, data []byte, off uint64) (uint32, bo
 		if err != nil {
 			return 0, false
 		}
-		volume.fileIDs[handleID] = fileID
+		f.ID = fileID
 	}
 	// Handle payload data
 	dataBuf := bytes.NewBuffer(data)
@@ -299,16 +299,21 @@ func (volume *Volume) truncateGrowFile(handleID int, oldPlainSz uint64, newPlain
 	// The new size is block-aligned. In this case we can do everything ourselves
 	// and avoid the call to doWrite.
 	if newPlainSz%volume.contentEnc.PlainBS() == 0 {
+		value, ok := volume.file_handles.Load(handleID)
+		if !ok {
+			return false
+		}
+		f := value.(*File)
 		// The file was empty, so it did not have a header. Create one.
 		if oldPlainSz == 0 {
-			id, err := createHeader(volume.file_handles[handleID].fd)
+			id, err := createHeader(f.fd)
 			if err != nil {
 				return false
 			}
-			volume.fileIDs[handleID] = id
+			f.ID = id
 		}
 		cSz := int64(volume.contentEnc.PlainSizeToCipherSize(newPlainSz))
-		err := syscall.Ftruncate(int(volume.file_handles[handleID].fd.Fd()), cSz)
+		err := syscall.Ftruncate(int(f.fd.Fd()), cSz)
 		return errToBool(err)
 	}
 	// The new size is NOT aligned, so we need to write a partial block.
@@ -319,7 +324,12 @@ func (volume *Volume) truncateGrowFile(handleID int, oldPlainSz uint64, newPlain
 }
 
 func (volume *Volume) truncate(handleID int, newSize uint64) bool {
-	fileFD := int(volume.file_handles[handleID].fd.Fd())
+	value, ok := volume.file_handles.Load(handleID)
+	if !ok {
+		return false
+	}
+	f := value.(*File)
+	fileFD := int(f.fd.Fd())
 	var err error
 	// Common case first: Truncate to zero
 	if newSize == 0 {
@@ -328,7 +338,7 @@ func (volume *Volume) truncate(handleID int, newSize uint64) bool {
 	}
 	// We need the old file size to determine if we are growing or shrinking
 	// the file
-	oldSize, _, success := gcf_get_attrs(volume.volumeID, volume.file_handles[handleID].path)
+	oldSize, _, success := gcf_get_attrs(volume.volumeID, f.path)
 	if !success {
 		return false
 	}
@@ -369,10 +379,11 @@ func (volume *Volume) truncate(handleID int, newSize uint64) bool {
 
 //export gcf_open_read_mode
 func gcf_open_read_mode(sessionID int, path string) int {
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return -1
 	}
+	volume := value.(*Volume)
 	dirfd, cName, err := volume.prepareAtSyscallMyself(path)
 	if err != nil {
 		return -1
@@ -389,10 +400,11 @@ func gcf_open_read_mode(sessionID int, path string) int {
 
 //export gcf_open_write_mode
 func gcf_open_write_mode(sessionID int, path string, mode uint32) int {
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return -1
 	}
+	volume := value.(*Volume)
 	dirfd, cName, err := volume.prepareAtSyscall(path)
 	if err != nil {
 		return -1
@@ -425,10 +437,11 @@ func gcf_open_write_mode(sessionID int, path string, mode uint32) int {
 
 //export gcf_truncate
 func gcf_truncate(sessionID int, handleID int, offset uint64) bool {
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return false
 	}
+	volume := value.(*Volume)
 	return volume.truncate(handleID, offset)
 }
 
@@ -440,10 +453,21 @@ func gcf_read_file(sessionID, handleID int, offset uint64, dst_buff []byte) uint
 		return 0
 	}
 
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return 0
 	}
+	volume := value.(*Volume)
+
+	value, ok = volume.file_handles.Load(handleID)
+	if !ok {
+		return 0
+	}
+	f := value.(*File)
+	f.fdLock.RLock()
+	defer f.fdLock.RUnlock()
+	f.contentLock.RLock()
+	defer f.contentLock.RUnlock()
 	out, success := volume.doRead(handleID, dst_buff[:0], offset, uint64(length))
 	if !success {
 		return 0
@@ -460,37 +484,49 @@ func gcf_write_file(sessionID, handleID int, offset uint64, data []byte) uint32 
 		return 0
 	}
 
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return 0
 	}
+	volume := value.(*Volume)
+
+	value, ok = volume.file_handles.Load(handleID)
+	if !ok {
+		return 0
+	}
+	f := value.(*File)
+	f.fdLock.RLock()
+        defer f.fdLock.RUnlock()
+	f.contentLock.Lock()
+        defer f.contentLock.Unlock()
 	n, _ := volume.doWrite(handleID, data, offset)
 	return n
 }
 
 //export gcf_close_file
 func gcf_close_file(sessionID, handleID int) {
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return
 	}
-	f, ok := volume.file_handles[handleID]
+	volume := value.(*Volume)
+	value, ok = volume.file_handles.Load(handleID)
 	if ok {
+		f := value.(*File)
+		f.fdLock.Lock()
 		f.fd.Close()
-		delete(volume.file_handles, handleID)
-		_, ok := volume.fileIDs[handleID]
-		if ok {
-			delete(volume.fileIDs, handleID)
-		}
+		volume.file_handles.Delete(handleID)
+		f.fdLock.Unlock()
 	}
 }
 
 //export gcf_remove_file
 func gcf_remove_file(sessionID int, path string) bool {
-	volume, ok := OpenedVolumes[sessionID]
+	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return false
 	}
+	volume := value.(*Volume)
 	dirfd, cName, err := volume.prepareAtSyscall(path)
 	if err != nil {
 		return false
