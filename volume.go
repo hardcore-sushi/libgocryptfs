@@ -44,7 +44,8 @@ type Volume struct {
 	cryptoCore     *cryptocore.CryptoCore
 	contentEnc     *contentenc.ContentEnc
 	dirCache       dirCache
-	file_handles   sync.Map
+	handlesLock    sync.RWMutex
+	fileHandles    map[int]*File
 }
 
 var OpenedVolumes sync.Map
@@ -93,6 +94,7 @@ func registerNewVolume(rootCipherDir string, masterkey []byte, cf *configfile.Co
 		ivLen = 0
 	}
 	newVolume.dirCache = dirCache{ivLen: ivLen}
+	newVolume.fileHandles = make(map[int]*File)
 
 	//find unused volumeID
 	volumeID := -1
@@ -130,10 +132,15 @@ func gcf_close(volumeID int) {
 	}
 	volume := value.(*Volume)
 	volume.cryptoCore.Wipe()
-	volume.file_handles.Range(func (handleID, _ interface {}) bool {
-		gcf_close_file(volumeID, handleID.(int))
-		return true
-	})
+	volume.handlesLock.RLock()
+	fileHandles := make([]int, 0, len(volume.fileHandles))
+	for i := range volume.fileHandles {
+		fileHandles = append(fileHandles, i)
+	}
+	volume.handlesLock.RUnlock()
+	for i := range fileHandles {
+		gcf_close_file(volumeID, i)
+	}
 	volume.dirCache.Clear()
 	OpenedVolumes.Delete(volumeID)
 }

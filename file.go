@@ -38,20 +38,21 @@ func mangleOpenFlags(flags uint32) (newFlags int) {
 }
 
 func (volume *Volume) registerFileHandle(fd int, cName, path string) int {
-	handleID := -1
+	volume.handlesLock.Lock()
 	c := 0
-	for handleID == -1 {
-		_, ok := volume.file_handles.Load(c)
+	for {
+		_, ok := volume.fileHandles[c]
 		if !ok {
-			handleID = c
+			break
 		}
 		c++
 	}
-	volume.file_handles.Store(handleID, &File {
+	volume.fileHandles[c] = &File {
 		fd: os.NewFile(uintptr(fd), cName),
 		path: string([]byte(path[:])),
-	})
-	return handleID
+	}
+	volume.handlesLock.Unlock()
+	return c
 }
 
 // readFileID loads the file header from disk and extracts the file ID.
@@ -102,12 +103,7 @@ func createHeader(fd *os.File) (fileID []byte, err error) {
 //
 // Called by Read() for normal reading,
 // by Write() and Truncate() via doWrite() for Read-Modify-Write.
-func (volume *Volume) doRead(handleID int, dst []byte, off uint64, length uint64) ([]byte, bool) {
-	value, ok := volume.file_handles.Load(handleID)
-	if !ok {
-		return nil, false
-	}
-	f := value.(*File)
+func (volume *Volume) doRead(f *File, dst []byte, off uint64, length uint64) ([]byte, bool) {
 	fd := f.fd
 	// Get the file ID, either from the open file table, or from disk.
 	var fileID []byte
@@ -183,11 +179,9 @@ func (volume *Volume) doRead(handleID int, dst []byte, off uint64, length uint64
 //
 // Empty writes do nothing and are allowed.
 func (volume *Volume) doWrite(handleID int, data []byte, off uint64) (uint32, bool) {
-	value, ok := volume.file_handles.Load(handleID)
-	if !ok {
-		return 0, false
-	}
-	f := value.(*File)
+	volume.handlesLock.RLock()
+	f := volume.fileHandles[handleID]
+	volume.handlesLock.RUnlock()
 	fd := f.fd
 	fileWasEmpty := false
 	var fileID []byte
@@ -216,7 +210,7 @@ func (volume *Volume) doWrite(handleID int, data []byte, off uint64) (uint32, bo
 		// Incomplete block -> Read-Modify-Write
 		if b.IsPartial() {
 			// Read
-			oldData, success := volume.doRead(handleID, nil, b.BlockPlainOff(), volume.contentEnc.PlainBS())
+			oldData, success := volume.doRead(f, nil, b.BlockPlainOff(), volume.contentEnc.PlainBS())
 			if !success {
 				return 0, false
 			}
@@ -299,11 +293,9 @@ func (volume *Volume) truncateGrowFile(handleID int, oldPlainSz uint64, newPlain
 	// The new size is block-aligned. In this case we can do everything ourselves
 	// and avoid the call to doWrite.
 	if newPlainSz%volume.contentEnc.PlainBS() == 0 {
-		value, ok := volume.file_handles.Load(handleID)
-		if !ok {
-			return false
-		}
-		f := value.(*File)
+		volume.handlesLock.RLock()
+		f := volume.fileHandles[handleID]
+		volume.handlesLock.RUnlock()
 		// The file was empty, so it did not have a header. Create one.
 		if oldPlainSz == 0 {
 			id, err := createHeader(f.fd)
@@ -324,11 +316,9 @@ func (volume *Volume) truncateGrowFile(handleID int, oldPlainSz uint64, newPlain
 }
 
 func (volume *Volume) truncate(handleID int, newSize uint64) bool {
-	value, ok := volume.file_handles.Load(handleID)
-	if !ok {
-		return false
-	}
-	f := value.(*File)
+	volume.handlesLock.RLock()
+	f := volume.fileHandles[handleID]
+	volume.handlesLock.RUnlock()
 	fileFD := int(f.fd.Fd())
 	var err error
 	// Common case first: Truncate to zero
@@ -359,7 +349,7 @@ func (volume *Volume) truncate(handleID int, newSize uint64) bool {
 	lastBlockLen := newSize - plainOff
 	var data []byte
 	if lastBlockLen > 0 {
-		data, success = volume.doRead(handleID, nil, plainOff, lastBlockLen)
+		data, success = volume.doRead(f, nil, plainOff, lastBlockLen)
 		if !success {
 			return false
 		}
@@ -459,16 +449,14 @@ func gcf_read_file(sessionID, handleID int, offset uint64, dst_buff []byte) uint
 	}
 	volume := value.(*Volume)
 
-	value, ok = volume.file_handles.Load(handleID)
-	if !ok {
-		return 0
-	}
-	f := value.(*File)
+	volume.handlesLock.RLock()
+	f := volume.fileHandles[handleID]
+	volume.handlesLock.RUnlock()
 	f.fdLock.RLock()
 	defer f.fdLock.RUnlock()
 	f.contentLock.RLock()
 	defer f.contentLock.RUnlock()
-	out, success := volume.doRead(handleID, dst_buff[:0], offset, uint64(length))
+	out, success := volume.doRead(f, dst_buff[:0], offset, uint64(length))
 	if !success {
 		return 0
 	} else {
@@ -490,13 +478,11 @@ func gcf_write_file(sessionID, handleID int, offset uint64, data []byte) uint32 
 	}
 	volume := value.(*Volume)
 
-	value, ok = volume.file_handles.Load(handleID)
-	if !ok {
-		return 0
-	}
-	f := value.(*File)
+	volume.handlesLock.RLock()
+	f := volume.fileHandles[handleID]
+	volume.handlesLock.RUnlock()
 	f.fdLock.RLock()
-        defer f.fdLock.RUnlock()
+	defer f.fdLock.RUnlock()
 	f.contentLock.Lock()
         defer f.contentLock.Unlock()
 	n, _ := volume.doWrite(handleID, data, offset)
@@ -510,14 +496,13 @@ func gcf_close_file(sessionID, handleID int) {
 		return
 	}
 	volume := value.(*Volume)
-	value, ok = volume.file_handles.Load(handleID)
-	if ok {
-		f := value.(*File)
-		f.fdLock.Lock()
-		f.fd.Close()
-		volume.file_handles.Delete(handleID)
-		f.fdLock.Unlock()
-	}
+	volume.handlesLock.Lock()
+	f := volume.fileHandles[handleID]
+	f.fdLock.Lock()
+	f.fd.Close()
+	delete(volume.fileHandles, handleID)
+	volume.handlesLock.Unlock()
+	f.fdLock.Unlock()
 }
 
 //export gcf_remove_file
