@@ -33,7 +33,7 @@ func (volume *Volume) isFiltered(path string) bool {
 }
 
 func (volume *Volume) prepareAtSyscall(path string) (dirfd int, cName string, err error) {
-	if path == "" {
+	if path == "/" {
 		return volume.prepareAtSyscallMyself(path)
 	}
 
@@ -111,7 +111,7 @@ func (volume *Volume) prepareAtSyscallMyself(path string) (dirfd int, cName stri
 	dirfd = -1
 
 	// Handle root node
-	if path == "" {
+	if path == "/" {
 		var err error
 		// Open cipherdir (following symlinks)
 		dirfd, err = syscallcompat.Open(volume.rootCipherDir, syscall.O_DIRECTORY|syscallcompat.O_PATH, 0)

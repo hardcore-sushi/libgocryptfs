@@ -10,27 +10,27 @@ import (
 )
 
 //export gcf_get_attrs
-func gcf_get_attrs(sessionID int, relPath string) (uint64, int64, bool) {
+func gcf_get_attrs(sessionID int, relPath string) (uint32, uint64, uint64, bool) {
 	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	volume := value.(*Volume)
 	dirfd, cName, err := volume.prepareAtSyscall(relPath)
 	if err != nil {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	defer syscall.Close(dirfd)
 
 	st, err := syscallcompat.Fstatat2(dirfd, cName, unix.AT_SYMLINK_NOFOLLOW)
 	if err != nil {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 
 	// Translate ciphertext size to plaintext size
 	size := volume.translateSize(dirfd, cName, st)
 
-	return size, int64(st.Mtim.Sec), true
+	return st.Mode, size, uint64(st.Mtim.Sec), true
 }
 
 // libgocryptfs: using Renameat instead of Renameat2 to support older kernels

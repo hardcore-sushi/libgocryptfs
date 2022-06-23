@@ -77,7 +77,7 @@ func gcf_list_dir(sessionID int, dirName string) (*C.char, *C.int, C.int) {
 	// Filter and decrypt filenames
 	for i := range cipherEntries {
 		cName := cipherEntries[i].Name
-		if dirName == "" && cName == configfile.ConfDefaultName {
+		if dirName == "/" && cName == configfile.ConfDefaultName {
 			// silently ignore "gocryptfs.conf" in the top level dir
 			continue
 		}

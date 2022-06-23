@@ -328,7 +328,7 @@ func (volume *Volume) truncate(handleID int, newSize uint64) bool {
 	}
 	// We need the old file size to determine if we are growing or shrinking
 	// the file
-	oldSize, _, success := gcf_get_attrs(volume.volumeID, f.path)
+	_, oldSize, _, success := gcf_get_attrs(volume.volumeID, f.path)
 	if !success {
 		return false
 	}
@@ -426,13 +426,18 @@ func gcf_open_write_mode(sessionID int, path string, mode uint32) int {
 }
 
 //export gcf_truncate
-func gcf_truncate(sessionID int, handleID int, offset uint64) bool {
+func gcf_truncate(sessionID int, path string, offset uint64) bool {
 	value, ok := OpenedVolumes.Load(sessionID)
 	if !ok {
 		return false
 	}
 	volume := value.(*Volume)
-	return volume.truncate(handleID, offset)
+	for handleID, file := range volume.fileHandles {
+		if file.path == path {
+			return volume.truncate(handleID, offset)
+		}
+	}
+	return false
 }
 
 //export gcf_read_file
