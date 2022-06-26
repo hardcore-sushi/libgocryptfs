@@ -1,4 +1,4 @@
-libgocryptfs is a re-desing of the original [gocryptfs](https://github.com/rfjakob/gocryptfs) code to work as a library. Volumes are not mounted with [FUSE](https://www.kernel.org/doc/html/latest/filesystems/fuse.html) but rather opened in memory and accessed through API calls. What the purpose ?
+libgocryptfs is a re-design of the original [gocryptfs](https://github.com/rfjakob/gocryptfs) code to work as a library. Volumes are not mounted with [FUSE](https://www.kernel.org/doc/html/latest/filesystems/fuse.html) but rather opened in memory and accessed through API calls. What the purpose ?
 - Allow the use of gocryptfs in embedded devices where FUSE is not available (such as Android)
 - Reduce attack surface by restricting volumes access to only one process rather than one user
 
