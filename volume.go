@@ -9,6 +9,7 @@ import (
 	"sync"
 	"syscall"
 	"path/filepath"
+	"runtime/debug"
 
 	"libgocryptfs/v2/internal/configfile"
 	"libgocryptfs/v2/internal/contentenc"
@@ -81,6 +82,7 @@ func registerNewVolume(rootCipherDir string, masterkey []byte, cf *configfile.Co
 	newVolume.nameTransform = nametransform.New(
 		newVolume.cryptoCore.EMECipher,
 		true,
+		cf.LongNameMax,
 		cf.IsFeatureFlagSet(configfile.FlagRaw64),
 		badname,
 		!cf.IsFeatureFlagSet(configfile.FlagDirIV),
@@ -116,6 +118,8 @@ func gcf_init(rootCipherDir string, password, givenScryptHash, returnedScryptHas
 	cf, err := configfile.Load(filepath.Join(rootCipherDir, configfile.ConfDefaultName))
 	if err == nil {
 		masterkey := cf.GetMasterkey(password, givenScryptHash, returnedScryptHashBuff)
+		wipe(password)
+		debug.FreeOSMemory()
 		if masterkey != nil {
 			volumeID = registerNewVolume(rootCipherDir, masterkey, cf)
 			wipe(masterkey)
@@ -152,14 +156,14 @@ func gcf_is_closed(volumeID int) bool {
 }
 
 //export gcf_change_password
-func gcf_change_password(rootCipherDir string, oldPassword, givenScryptHash, new_password, returnedScryptHashBuff []byte) bool {
+func gcf_change_password(rootCipherDir string, oldPassword, givenScryptHash, newPassword, returnedScryptHashBuff []byte) bool {
 	success := false
 	cf, err := configfile.Load(filepath.Join(rootCipherDir, configfile.ConfDefaultName))
 	if err == nil {
 		masterkey := cf.GetMasterkey(oldPassword, givenScryptHash, nil)
 		if masterkey != nil {
 			logN := cf.ScryptObject.LogN()
-			scryptHash := cf.EncryptKey(masterkey, new_password, logN, len(returnedScryptHashBuff) > 0)
+			scryptHash := cf.EncryptKey(masterkey, newPassword, logN, len(returnedScryptHashBuff) > 0)
 			wipe(masterkey)
 			for i := range scryptHash {
 				returnedScryptHashBuff[i] = scryptHash[i]
@@ -168,6 +172,9 @@ func gcf_change_password(rootCipherDir string, oldPassword, givenScryptHash, new
 			success = errToBool(cf.WriteFile())
 		}
 	}
+	wipe(newPassword)
+	wipe(oldPassword)
+	wipe(givenScryptHash)
 	return success
 }
 
@@ -191,7 +198,9 @@ func gcf_create_volume(rootCipherDir string, password []byte, plaintextNames boo
 		AESSIV:             false,
 		DeterministicNames: false,
 		XChaCha20Poly1305:  useXChaCha,
+		LongNameMax:        255,
 	}, returnedScryptHashBuff)
+	wipe(password)
 	if err == nil {
 		if plaintextNames {
 			return true

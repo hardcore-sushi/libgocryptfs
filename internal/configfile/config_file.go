@@ -54,6 +54,8 @@ type ConfFile struct {
 	FeatureFlags []string
 	// FIDO2 parameters
 	FIDO2 *FIDO2Params `json:",omitempty"`
+	// LongNameMax corresponds to the -longnamemax flag
+	LongNameMax uint8 `json:",omitempty"`
 	// Filename is the name of the config file. Not exported to JSON.
 	filename string
 }
@@ -68,6 +70,7 @@ type CreateArgs struct {
 	AESSIV             bool
 	DeterministicNames bool
 	XChaCha20Poly1305  bool
+	LongNameMax        uint8
 }
 
 // Create - create a new config with a random key encrypted with
@@ -93,6 +96,12 @@ func Create(args *CreateArgs, returnedScryptHashBuff []byte) error {
 	} else {
 		if !args.DeterministicNames {
 			cf.setFeatureFlag(FlagDirIV)
+		}
+		// 0 means to *use* the default (which means we don't have to save it), and
+		// 255 *is* the default, which means we don't have to save it either.
+		if args.LongNameMax != 0 && args.LongNameMax != 255 {
+			cf.LongNameMax = args.LongNameMax
+			cf.setFeatureFlag(FlagLongNameMax)
 		}
 		cf.setFeatureFlag(FlagEMENames)
 		cf.setFeatureFlag(FlagLongNames)
