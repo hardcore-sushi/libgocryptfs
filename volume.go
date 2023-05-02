@@ -114,17 +114,18 @@ func registerNewVolume(rootCipherDir string, masterkey []byte, cf *configfile.Co
 
 //export gcf_init
 func gcf_init(rootCipherDir string, password, givenScryptHash, returnedScryptHashBuff []byte) int {
-	volumeID := -1
+	defer wipe(password)
 	cf, err := configfile.Load(filepath.Join(rootCipherDir, configfile.ConfDefaultName))
-	if err == nil {
-		masterkey := cf.GetMasterkey(password, givenScryptHash, returnedScryptHashBuff)
-		wipe(password)
-		debug.FreeOSMemory()
-		if masterkey != nil {
-			volumeID = registerNewVolume(rootCipherDir, masterkey, cf)
-			wipe(masterkey)
-		}
+	if err != nil {
+		return -1
 	}
+	masterkey, err := cf.GetMasterkey(password, givenScryptHash, returnedScryptHashBuff)
+	if err != nil {
+		return -2
+	}
+	debug.FreeOSMemory()
+	volumeID := registerNewVolume(rootCipherDir, masterkey, cf)
+	wipe(masterkey)
 	return volumeID
 }
 
@@ -160,8 +161,8 @@ func gcf_change_password(rootCipherDir string, oldPassword, givenScryptHash, new
 	success := false
 	cf, err := configfile.Load(filepath.Join(rootCipherDir, configfile.ConfDefaultName))
 	if err == nil {
-		masterkey := cf.GetMasterkey(oldPassword, givenScryptHash, nil)
-		if masterkey != nil {
+		masterkey, err := cf.GetMasterkey(oldPassword, givenScryptHash, nil)
+		if err == nil {
 			logN := cf.ScryptObject.LogN()
 			scryptHash := cf.EncryptKey(masterkey, newPassword, logN, len(returnedScryptHashBuff) > 0)
 			wipe(masterkey)

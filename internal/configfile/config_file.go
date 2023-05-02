@@ -204,6 +204,23 @@ func (cf *ConfFile) setFeatureFlag(flag flagIota) {
 	cf.FeatureFlags = append(cf.FeatureFlags, knownFlags[flag])
 }
 
+// libgocryptfs function to allow masterkey to be directely decrypted using the scrypt hash
+func (cf *ConfFile) DecryptMasterKeyWithScryptHash(scryptHash []byte) ([]byte, error) {
+	useHKDF := cf.IsFeatureFlagSet(FlagHKDF)
+	ce := getKeyEncrypter(scryptHash, useHKDF)
+
+	masterkey, err := ce.DecryptBlock(cf.EncryptedKey, 0, nil)
+
+	ce.Wipe()
+	ce = nil
+
+	if err != nil {
+		return nil, exitcodes.NewErr("Password incorrect.", exitcodes.PasswordIncorrect)
+	}
+
+	return masterkey, nil
+}
+
 // DecryptMasterKey decrypts the masterkey stored in cf.EncryptedKey using
 // password.
 func (cf *ConfFile) DecryptMasterKey(password []byte, giveHash bool) (masterkey, scryptHash []byte, err error) {
@@ -211,10 +228,7 @@ func (cf *ConfFile) DecryptMasterKey(password []byte, giveHash bool) (masterkey,
 	scryptHash = cf.ScryptObject.DeriveKey(password)
 
 	// Unlock master key using password-based key
-	useHKDF := cf.IsFeatureFlagSet(FlagHKDF)
-	ce := getKeyEncrypter(scryptHash, useHKDF)
-
-	masterkey, err = ce.DecryptBlock(cf.EncryptedKey, 0, nil)
+	masterkey, err = cf.DecryptMasterKeyWithScryptHash(scryptHash)
 
 	if !giveHash {
 		// Purge scrypt-derived key
@@ -223,14 +237,8 @@ func (cf *ConfFile) DecryptMasterKey(password []byte, giveHash bool) (masterkey,
 		}
 		scryptHash = nil
 	}
-	ce.Wipe()
-	ce = nil
 
-	if err != nil {
-		return nil, nil, exitcodes.NewErr("Password incorrect.", exitcodes.PasswordIncorrect)
-	}
-
-	return masterkey, scryptHash, nil
+	return masterkey, scryptHash, err
 }
 
 // EncryptKey - encrypt "key" using an scrypt hash generated from "password"
@@ -260,20 +268,12 @@ func (cf *ConfFile) EncryptKey(key []byte, password []byte, logN int, giveHash b
 	return scryptHash
 }
 
-// DroidFS function to allow masterkey to be decrypted directely using the scrypt hash and return it if requested
-func (cf *ConfFile) GetMasterkey(password, givenScryptHash, returnedScryptHashBuff []byte) []byte {
+func (cf *ConfFile) GetMasterkey(password, givenScryptHash, returnedScryptHashBuff []byte) ([]byte, error) {
 	var masterkey []byte
 	var err error
 	var scryptHash []byte
 	if len(givenScryptHash) > 0 { //decrypt with hash
-		useHKDF := cf.IsFeatureFlagSet(FlagHKDF)
-		ce := getKeyEncrypter(givenScryptHash, useHKDF)
-		masterkey, err = ce.DecryptBlock(cf.EncryptedKey, 0, nil)
-		ce.Wipe()
-		ce = nil
-		if err == nil {
-			return masterkey
-		}
+		masterkey, err = cf.DecryptMasterKeyWithScryptHash(scryptHash)
 	} else { //decrypt with password
 		masterkey, scryptHash, err = cf.DecryptMasterKey(password, len(returnedScryptHashBuff) > 0)
 		//copy and wipe scryptHash
@@ -281,11 +281,8 @@ func (cf *ConfFile) GetMasterkey(password, givenScryptHash, returnedScryptHashBu
 			returnedScryptHashBuff[i] = scryptHash[i]
 			scryptHash[i] = 0
 		}
-		if err == nil {
-			return masterkey
-		}
 	}
-	return nil
+	return masterkey, err
 }
 
 // WriteFile - write out config in JSON format to file "filename.tmp"
