@@ -271,10 +271,10 @@ func (cf *ConfFile) EncryptKey(key []byte, password []byte, logN int, giveHash b
 func (cf *ConfFile) GetMasterkey(password, givenScryptHash, returnedScryptHashBuff []byte) ([]byte, error) {
 	var masterkey []byte
 	var err error
-	var scryptHash []byte
 	if len(givenScryptHash) > 0 { //decrypt with hash
-		masterkey, err = cf.DecryptMasterKeyWithScryptHash(scryptHash)
+		masterkey, err = cf.DecryptMasterKeyWithScryptHash(givenScryptHash)
 	} else { //decrypt with password
+		var scryptHash []byte
 		masterkey, scryptHash, err = cf.DecryptMasterKey(password, len(returnedScryptHashBuff) > 0)
 		//copy and wipe scryptHash
 		for i := range scryptHash {
