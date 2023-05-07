@@ -174,6 +174,7 @@ func (volume *Volume) translateSize(dirfd int, cName string, st *syscall.Stat_t)
 	if isRegular(st.Mode) {
 		size = volume.contentEnc.CipherSizeToPlainSize(uint64(st.Size))
 	} else if isSymlink(st.Mode) {
+		// read and decrypt target
 		target := volume.readlink(dirfd, cName)
 		size = uint64(len(target))
 	}
