@@ -1,7 +1,6 @@
 /build
 /include
 /lib
-/openssl*
 
 # temporary files created by the tests
 /tmp
