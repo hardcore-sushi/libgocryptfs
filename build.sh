@@ -37,11 +37,16 @@ else
         if [ -f "Makefile" ]; then
                 make clean
         fi
-        ./Configure $OPENSSL_ARCH -D__ANDROID_API__=21
+        ./Configure $OPENSSL_ARCH -D__ANDROID_API__=21 \
+          no-tests no-docs no-legacy no-engine no-comp no-cms no-ts no-ocsp \
+          no-ct no-cmp no-srp no-psk no-ui-console no-filenames no-siv no-ocb \
+          no-ssl no-des no-rc2 no-rc4 no-rc5 no-idea no-bf no-cast no-seed \
+          no-camellia no-aria no-sm2 no-sm3 no-sm4 no-md2 no-md4 no-mdc2 \
+          no-whirlpool no-rmd160 no-blake2 no-dsa no-dh no-ec no-ecx no-scrypt
         make -j "$(nproc --all)" build_libs
       )
       mkdir -p "./lib/$1" "./include/$1"
-      cp "$OPENSSL_PATH/libcrypto.a" "$OPENSSL_PATH/libssl.a" "./lib/$1"
+      cp "$OPENSSL_PATH/libcrypto.a" "./lib/$1"
       cp -r "$OPENSSL_PATH"/include/* "./include/$1/"
     fi
   }
